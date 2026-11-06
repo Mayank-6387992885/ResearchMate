@@ -1,0 +1,34 @@
+.chart-list {
+  display: grid;
+  gap: 14px;
+}
+
+.chart-row {
+  display: grid;
+  grid-template-columns: 130px 1fr 45px;
+  gap: 12px;
+  align-items: center;
+  font-size: 13px;
+}
+
+.chart-row>span {
+  color: #687287;
+}
+
+.chart-track {
+  height: 9px;
+}
+
+.chart-fill {
+  background: #8c81f4;
+}
+
+.spin {
+  animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
