@@ -29,29 +29,61 @@ import services.paper_service as paper_service
 from summarizer import summarize_paper
 
 app = FastAPI(title="ResearchMate API")
-app.include_router(auth_router)
+
+
+# app.include_router(auth_router)
+
+# app.add_middleware(
+#     CORSMiddleware,
+#     allow_origins=[
+#         "http://localhost:3000",
+#         "http://127.0.0.1:3000",
+
+#         "http://localhost:5173",
+#         "http://127.0.0.1:5173",
+
+#         "http://localhost:5500",
+#         "http://127.0.0.1:5500",
+
+#         "http://localhost:8000",
+#         "http://127.0.0.1:8000",
+#     ],
+#     allow_credentials=True,
+#     allow_methods=["*"],
+#     allow_headers=["*"],
+# )
+
+# BASE_DIR = Path(__file__).resolve().parent
+
+
+# Get deployed frontend URL from environment variables
+frontend_url = os.getenv("FRONTEND_URL", "").strip().rstrip("/")
+
+# Allowed frontend origins
+allowed_origins = [
+    "http://localhost:3000",
+    "http://127.0.0.1:3000",
+    "http://localhost:5173",
+    "http://127.0.0.1:5173",
+    "http://localhost:5500",
+    "http://127.0.0.1:5500",
+    "http://localhost:8000",
+    "http://127.0.0.1:8000",
+]
+
+# Add deployed frontend URL
+if frontend_url:
+    allowed_origins.append(frontend_url)
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        "http://localhost:3000",
-        "http://127.0.0.1:3000",
-
-        "http://localhost:5173",
-        "http://127.0.0.1:5173",
-
-        "http://localhost:5500",
-        "http://127.0.0.1:5500",
-
-        "http://localhost:8000",
-        "http://127.0.0.1:8000",
-    ],
+    allow_origins=allowed_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-BASE_DIR = Path(__file__).resolve().parent
+
 MAX_FILE_SIZE = 10 * 1024 * 1024
 
 
