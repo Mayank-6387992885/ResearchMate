@@ -7,12 +7,11 @@ from sqlalchemy.orm import sessionmaker, declarative_base
 
 BASE_DIR = Path(__file__).resolve().parent
 
-# Use PostgreSQL when DATABASE_URL is configured.
-# Otherwise, use SQLite for local development.
+# Use PostgreSQL in production.
+# Use SQLite for local development.
 DATABASE_URL = os.getenv("DATABASE_URL")
 
 if DATABASE_URL:
-    # Normalize older PostgreSQL URL formats if necessary.
     if DATABASE_URL.startswith("postgres://"):
         DATABASE_URL = DATABASE_URL.replace(
             "postgres://",
@@ -20,7 +19,8 @@ if DATABASE_URL:
             1
         )
 
-    connect_args = {}
+    connect_args = {"sslmode": "require"}
+
 else:
     DATABASE_URL = (
         f"sqlite:///{(BASE_DIR / 'researchmate.db').as_posix()}"

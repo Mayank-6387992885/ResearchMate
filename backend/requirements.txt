@@ -8,3 +8,4 @@ sqlalchemy
 python-dotenv
 psycopg2-binary
 psycopg[binary]
+supabase>=2.0,<3

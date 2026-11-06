@@ -12,7 +12,7 @@ from fastapi import (
     BackgroundTasks, Depends, FastAPI, File, Header, HTTPException, UploadFile,
 )
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, PlainTextResponse
+from fastapi.responses import PlainTextResponse, Response
 from pydantic import BaseModel, Field
 from sqlalchemy import inspect, text
 from sqlalchemy.orm import Session
@@ -30,8 +30,8 @@ from summarizer import summarize_paper
 
 app = FastAPI(title="ResearchMate API")
 
-
-# app.include_router(auth_router)
+# Register authentication routes
+app.include_router(auth_router)
 
 # app.add_middleware(
 #     CORSMiddleware,
@@ -53,7 +53,7 @@ app = FastAPI(title="ResearchMate API")
 #     allow_headers=["*"],
 # )
 
-# BASE_DIR = Path(__file__).resolve().parent
+BASE_DIR = Path(__file__).resolve().parent
 
 
 # Get deployed frontend URL from environment variables
@@ -74,6 +74,8 @@ allowed_origins = [
 # Add deployed frontend URL
 if frontend_url:
     allowed_origins.append(frontend_url)
+else:
+    print("[WARNING] FRONTEND_URL is not set; deployed frontend may be blocked by CORS.", flush=True)
 
 app.add_middleware(
     CORSMiddleware,
@@ -118,7 +120,7 @@ def create_database_tables():
     if "updated_at" not in paper_columns:
         with engine.begin() as connection:
             connection.execute(
-                text("ALTER TABLE research_papers ADD COLUMN updated_at DATETIME")
+                text("ALTER TABLE research_papers ADD COLUMN updated_at TIMESTAMP")
             )
     if "user_id" not in paper_columns:
         with engine.begin() as connection:
@@ -141,12 +143,12 @@ def create_database_tables():
     if "phone_verified" not in user_columns:
         with engine.begin() as connection:
             connection.execute(
-                text("ALTER TABLE users ADD COLUMN phone_verified BOOLEAN NOT NULL DEFAULT 0")
+                text("ALTER TABLE users ADD COLUMN phone_verified BOOLEAN NOT NULL DEFAULT FALSE")
             )
     user_profile_columns = {
         "username": "VARCHAR(30)",
         "profile_data": "TEXT NOT NULL DEFAULT '{}'",
-        "profile_image": "BLOB",
+        "profile_image": "BYTEA",
         "profile_image_type": "VARCHAR(32)",
         "notification_preferences": "TEXT NOT NULL DEFAULT '{}'",
         "privacy_settings": "TEXT NOT NULL DEFAULT '{}'",
@@ -176,7 +178,7 @@ def create_database_tables():
     if "used_at" not in sms_verification_columns:
         with engine.begin() as connection:
             connection.execute(
-                text("ALTER TABLE sms_verifications ADD COLUMN used_at DATETIME")
+                text("ALTER TABLE sms_verifications ADD COLUMN used_at TIMESTAMP")
             )
 
     progress_columns = {
@@ -196,14 +198,21 @@ def create_database_tables():
             ProgressTask.status == "processing",
         ).all()
         for task in interrupted_tasks:
-            if not _process_is_running(task.owner_pid):
-                task.status = "error"
-                task.message = "Backend stopped before this analysis completed."
-                task.updated_at = time.time()
+            if not _process_is_running(getattr(task, "owner_pid", None)):
+                setattr(task, "status", "error")
+                setattr(
+                    task,
+                    "message",
+                    "Backend stopped before this analysis completed.",
+                )
+                setattr(task, "updated_at", time.time())
         db.commit()
 
 
-def _process_is_running(process_id: int) -> bool:
+def _process_is_running(process_id: int | None) -> bool:
+    if process_id is None:
+        return False
+
     if os.name == "nt":
         kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
         open_process = kernel32.OpenProcess
@@ -284,12 +293,14 @@ def set_progress(
 def get_progress_state(task_id: str, user_id: int) -> dict[str, Any] | None:
     with SessionLocal() as db:
         task = db.get(ProgressTask, task_id)
-        if task is None or task.owner_user_id != user_id:
+        if task is None or getattr(task, "owner_user_id", None) != user_id:
             return None
-        if task.status == "processing" and not _process_is_running(task.owner_pid):
-            task.status = "error"
-            task.message = "Backend stopped before this analysis completed."
-            task.updated_at = time.time()
+        if getattr(task, "status", None) == "processing" and not _process_is_running(
+            getattr(task, "owner_pid", None)
+        ):
+            setattr(task, "status", "error")
+            setattr(task, "message", "Backend stopped before this analysis completed.")
+            setattr(task, "updated_at", time.time())
             db.commit()
         return task.to_dict()
 
@@ -337,6 +348,7 @@ async def upload_paper(
     """Upload, extract, summarize, then save the PDF and summary in the library."""
     start_time = time.time()
     task_id = x_task_id or str(uuid.uuid4())
+    user_id = int(getattr(user, "id", 0) or 0)
     with SessionLocal() as task_db:
         if task_db.get(ProgressTask, task_id) is not None:
             raise HTTPException(status_code=409, detail="This analysis task ID has already been used.")
@@ -346,9 +358,9 @@ async def upload_paper(
         message: str,
         partial_result: dict[str, Any] | None = None,
     ) -> None:
-        set_progress(task_id, progress, message, result=partial_result, user_id=user.id)
+        set_progress(task_id, progress, message, result=partial_result, user_id=user_id)
 
-    set_progress(task_id, 0, "Starting upload...", user_id=user.id)
+    set_progress(task_id, 0, "Starting upload...", user_id=user_id)
 
     try:
         if file.content_type != "application/pdf":
@@ -597,14 +609,10 @@ def classify_saved_paper(
     user: User = Depends(get_current_user),
 ):
     paper = getattr(paper_service, "get_paper_or_404")(db, paper_id, user.id)
-    path = Path(paper.file_path)
-    upload_dir = (BASE_DIR / "uploads" / "research_papers").resolve()
-    if not path.is_file() or path.parent.resolve() != upload_dir:
-        raise HTTPException(status_code=404, detail="The stored PDF file is missing.")
-
     try:
-        with pymupdf.open(path) as pdf:
-            paper_text = "\n".join(page.get_text("text") for page in pdf)
+        pdf_content = paper_service.get_pdf_content(paper)
+        with pymupdf.open(stream=pdf_content, filetype="pdf") as pdf:
+            paper_text = "\\n".join(page.get_text("text") for page in pdf)
     except (pymupdf.FileDataError, RuntimeError, OSError) as exc:
         raise HTTPException(
             status_code=422,
@@ -648,13 +656,13 @@ def download_paper(
     user: User = Depends(get_current_user),
 ):
     paper = getattr(paper_service, "get_paper_or_404")(db, paper_id, user.id)
-    path = Path(paper.file_path)
-
-    # Protect against stale or manually edited database paths.
-    if not path.is_file() or path.parent.resolve() != (BASE_DIR / "uploads" / "research_papers").resolve():
-        raise HTTPException(status_code=404, detail="The stored PDF file is missing.")
-
-    return FileResponse(path, media_type="application/pdf", filename=paper.filename)
+    pdf_content = paper_service.get_pdf_content(paper)
+    safe_filename = Path(paper.filename or "research-paper.pdf").name.replace('"', "")
+    return Response(
+        content=pdf_content,
+        media_type="application/pdf",
+        headers={"Content-Disposition": f'attachment; filename="{safe_filename}"'},
+    )
 
 
 @app.get("/papers/{paper_id}/download-summary")
