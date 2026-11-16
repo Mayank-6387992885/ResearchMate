@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   ArrowLeft, ArrowRight, BookOpen, Eye, EyeOff, LoaderCircle, LockKeyhole, Mail, Moon, Phone, Sparkles, Sun, UserRound,
 } from "lucide-react";
@@ -51,6 +51,7 @@ export default function AuthGate({
   const [resetToken, setResetToken] = useState(
     () => new URLSearchParams(window.location.search).get("reset_password") || "",
   );
+  const verificationAttempted = useRef(false);
 
   useEffect(() => {
     let active = true;
@@ -93,7 +94,9 @@ export default function AuthGate({
     const params = new URLSearchParams(window.location.search);
     const verifyToken = params.get("verify_email");
     const resetLinkToken = params.get("reset_password");
-    if (verifyToken) {
+    if (verifyToken && !verificationAttempted.current) {
+      verificationAttempted.current = true;
+      window.history.replaceState({}, "", window.location.pathname);
       setBusy(true);
       apiFetch(API.verifyEmail, {
         method: "POST",
@@ -109,12 +112,9 @@ export default function AuthGate({
         .catch((err) => setError(err.message))
         .finally(() => setBusy(false));
     } else if (resetLinkToken) {
+      window.history.replaceState({}, "", window.location.pathname);
       setMode("reset");
       setNotice("Choose a new password for your account.");
-    }
-
-    if (verifyToken || resetLinkToken) {
-      window.history.replaceState({}, "", window.location.pathname);
     }
 
     return () => {

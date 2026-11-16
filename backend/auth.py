@@ -690,25 +690,25 @@ def register(payload: Credentials, db: Session = Depends(get_db)):
             purpose="email_verification",
             expires_at=_utcnow() + timedelta(hours=VERIFICATION_HOURS),
         ))
-        db.commit()
-    except Exception:
-        db.rollback()
-        raise
-
-    verification_url = f"{FRONTEND_URL}/?verify_email={verification_token}"
-    plain_text, html_body = _verification_email_content(verification_url)
-    try:
+        verification_url = f"{FRONTEND_URL}/?verify_email={verification_token}"
+        plain_text, html_body = _verification_email_content(verification_url)
         _send_email(
             email,
             "Verify your ResearchMate account",
             plain_text,
             html_body,
         )
+        db.commit()
     except (OSError, smtplib.SMTPException) as exc:
+        db.rollback()
         raise HTTPException(
             status_code=503,
-            detail="Your account was created but the verification email could not be sent. Try resending it.",
+            detail="Could not send verification email. Please check your email configuration and try again.",
         ) from exc
+    except Exception:
+        db.rollback()
+        raise
+
     return {"message": "Check your email for an account verification link."}
 
 
@@ -1086,21 +1086,35 @@ def resend_verification(payload: EmailAddress, db: Session = Depends(get_db)):
     user = db.query(User).filter(User.email == email).first()
     if user is None or user.email_verified:
         return {"message": "If the account needs verification, an email will be sent."}
-    token = _create_token(
-        db,
-        user.id,
-        "email_verification",
-        _utcnow() + timedelta(hours=VERIFICATION_HOURS),
-    )
-    db.commit()
-    verification_url = f"{FRONTEND_URL}/?verify_email={token}"
-    plain_text, html_body = _verification_email_content(verification_url)
-    _send_email(
-        email,
-        "Verify your ResearchMate account",
-        plain_text,
-        html_body,
-    )
+    try:
+        db.query(AuthToken).filter(
+            AuthToken.user_id == user.id,
+            AuthToken.purpose == "email_verification",
+        ).delete(synchronize_session=False)
+        token = _create_token(
+            db,
+            user.id,
+            "email_verification",
+            _utcnow() + timedelta(hours=VERIFICATION_HOURS),
+        )
+        verification_url = f"{FRONTEND_URL}/?verify_email={token}"
+        plain_text, html_body = _verification_email_content(verification_url)
+        _send_email(
+            email,
+            "Verify your ResearchMate account",
+            plain_text,
+            html_body,
+        )
+        db.commit()
+    except (OSError, smtplib.SMTPException) as exc:
+        db.rollback()
+        raise HTTPException(
+            status_code=503,
+            detail="Could not send verification email. Please check your email configuration and try again.",
+        ) from exc
+    except Exception:
+        db.rollback()
+        raise
     return {"message": "If the account needs verification, an email will be sent."}
 
 
