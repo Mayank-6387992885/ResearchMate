@@ -1,22 +1,14 @@
 #!/usr/bin/env python3
-"""Convenience root wrapper for backend/toggle_verification.py.
-
-Usage:
-    python toggle_verification.py status
-    python toggle_verification.py on
-    python toggle_verification.py off
-    python toggle_verification.py off --verify-all
-    python toggle_verification.py toggle
-"""
+"""Convenience root wrapper for backend/toggle_verification.py."""
+import importlib.util
 import sys
 from pathlib import Path
 
-# Add backend directory to sys.path
-backend_dir = Path(__file__).resolve().parent / "backend"
-if str(backend_dir) not in sys.path:
-    sys.path.insert(0, str(backend_dir))
-
-from toggle_verification import main
+backend_file = Path(__file__).resolve().parent / "backend" / "toggle_verification.py"
+spec = importlib.util.spec_from_file_location("backend_toggle_verification", backend_file)
+mod = importlib.util.module_from_spec(spec)
+sys.modules["backend_toggle_verification"] = mod
+spec.loader.exec_module(mod)
 
 if __name__ == "__main__":
-    main()
+    mod.main()
