@@ -1,0 +1,50 @@
+services:
+  - type: web
+    name: researchmate-api
+    runtime: python
+    plan: free
+    region: oregon
+    rootDir: backend
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn main:app --host 0.0.0.0 --port $PORT
+    healthCheckPath: /health
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.12.8
+      - key: DATABASE_URL
+        fromDatabase:
+          name: researchmate-db
+          property: connectionString
+      - key: FRONTEND_URL
+        value: https://researchmate-frontend.onrender.com
+      - key: AUTH_COOKIE_SECURE
+        value: "true"
+      - key: SEND_VERIFICATION_EMAIL
+        value: "false"
+      - key: OLLAMA_URL
+        sync: false
+      - key: SUPABASE_URL
+        sync: false
+      - key: SUPABASE_SERVICE_ROLE_KEY
+        sync: false
+      - key: SUPABASE_STORAGE_BUCKET
+        value: research-papers
+
+  - type: web
+    name: researchmate-frontend
+    runtime: static
+    rootDir: frontend
+    buildCommand: npm ci && npm run build
+    staticPublishPath: ./dist
+    envVars:
+      - key: NODE_VERSION
+        value: 22.12.0
+      - key: VITE_API_BASE_URL
+        value: https://researchmate-api.onrender.com
+
+databases:
+  - name: researchmate-db
+    plan: free
+    region: oregon
+    databaseName: researchmate
+    user: researchmate

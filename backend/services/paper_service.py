@@ -23,6 +23,14 @@ def _storage_client() -> Client:
     return create_client(url, key)
 
 
+def _supabase_storage_enabled() -> bool:
+    url = os.getenv("SUPABASE_URL", "").strip()
+    key = os.getenv("SUPABASE_SERVICE_ROLE_KEY", "").strip()
+    if bool(url) != bool(key):
+        raise RuntimeError("Set both SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY, or leave both empty.")
+    return bool(url)
+
+
 def _safe_filename(filename: str | None) -> str:
     name = (filename or "research-paper.pdf").replace("\\\\", "/").split("/")[-1]
     return name[:255] or "research-paper.pdf"
@@ -41,6 +49,10 @@ def get_pdf_content(paper: ResearchPaper) -> bytes:
         old_file = Path(location)
         if old_file.is_file():
             return old_file.read_bytes()
+        if not _supabase_storage_enabled():
+            raise HTTPException(status_code=404, detail="The stored PDF is unavailable on local storage.")
+    elif not _supabase_storage_enabled():
+        raise HTTPException(status_code=404, detail="The stored PDF is unavailable on local storage.")
     try:
         data = _storage_client().storage.from_(BUCKET_NAME).download(location)
         return data if isinstance(data, bytes) else bytes(data)
@@ -62,22 +74,31 @@ def create_paper(
     title = Path(filename).stem[:255] or "Untitled Research Paper"
     stored_filename = f"{uuid4().hex}.pdf"
     object_key = f"user-{user_id}/{stored_filename}"
+    use_supabase = _supabase_storage_enabled()
+    local_path = LEGACY_UPLOAD_DIR / stored_filename
 
     try:
-        _storage_client().storage.from_(BUCKET_NAME).upload(
-            path=object_key,
-            file=pdf_content,
-            file_options={"content-type": "application/pdf", "upsert": "false"},
-        )
+        if use_supabase:
+            _storage_client().storage.from_(BUCKET_NAME).upload(
+                path=object_key,
+                file=pdf_content,
+                file_options={"content-type": "application/pdf", "upsert": "false"},
+            )
+        else:
+            local_path.parent.mkdir(parents=True, exist_ok=True)
+            local_path.write_bytes(pdf_content)
     except Exception as exc:
-        print(f"[STORAGE ERROR] PDF upload failed: {exc!r}", flush=True)
-        raise HTTPException(status_code=502, detail="Could not save the PDF to cloud storage.") from exc
+        if not use_supabase:
+            local_path.unlink(missing_ok=True)
+        storage_type = "cloud" if use_supabase else "local"
+        print(f"[STORAGE ERROR] PDF upload to {storage_type} storage failed: {exc!r}", flush=True)
+        raise HTTPException(status_code=502, detail=f"Could not save the PDF to {storage_type} storage.") from exc
 
     paper = ResearchPaper(
         title=title,
         filename=filename,
         stored_filename=stored_filename,
-        file_path=object_key,
+        file_path=object_key if use_supabase else str(local_path),
         summary=summary,
         pages=pages,
         user_id=user_id,
@@ -89,10 +110,13 @@ def create_paper(
         db.refresh(paper)
     except Exception:
         db.rollback()
-        try:
-            _storage_client().storage.from_(BUCKET_NAME).remove([object_key])
-        except Exception as cleanup_exc:
-            print(f"[STORAGE WARNING] Orphan cleanup failed: {cleanup_exc!r}", flush=True)
+        if use_supabase:
+            try:
+                _storage_client().storage.from_(BUCKET_NAME).remove([object_key])
+            except Exception as cleanup_exc:
+                print(f"[STORAGE WARNING] Orphan cleanup failed: {cleanup_exc!r}", flush=True)
+        else:
+            local_path.unlink(missing_ok=True)
         raise
     return paper
 
@@ -159,10 +183,15 @@ def update_paper(db: Session, paper_id: int, user_id: int,
 def delete_paper(db: Session, paper_id: int, user_id: int) -> None:
     paper = get_paper_or_404(db, paper_id, user_id)
     location = str(paper.file_path or "")
+    is_local_file = _is_legacy_local_path(location)
+    use_supabase = not is_local_file and _supabase_storage_enabled()
     db.delete(paper)
     db.commit()
-    if _is_legacy_local_path(location):
+    if is_local_file:
         Path(location).unlink(missing_ok=True)
+        return
+    if not use_supabase:
+        print(f"[STORAGE WARNING] No local file exists for stored PDF {location!r}.", flush=True)
         return
     try:
         _storage_client().storage.from_(BUCKET_NAME).remove([location])

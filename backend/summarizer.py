@@ -11,8 +11,8 @@ from typing import Any, Callable
 
 import requests
 
-OLLAMA_URL = "http://localhost:11434/api/generate"
-MODEL_NAME = "llama3.2:3b"
+OLLAMA_URL = os.getenv("OLLAMA_URL", "").strip() or "http://localhost:11434/api/generate"
+MODEL_NAME = os.getenv("OLLAMA_MODEL", "").strip() or "llama3.2:3b"
 CHUNK_SIZE = 4000
 REQUEST_TIMEOUT = (10, 600)  # connect timeout, read timeout in seconds
 PROGRESS_HEARTBEAT_SECONDS = 15

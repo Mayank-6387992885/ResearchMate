@@ -6,6 +6,7 @@ from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 from unittest.mock import Mock, patch
 
+from fastapi import Response
 from pydantic import ValidationError
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
@@ -21,6 +22,67 @@ from models.user import User
 
 
 class AuthHelperTests(unittest.TestCase):
+    def test_registration_without_verification_email_can_sign_in(self):
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            test_engine = create_engine(
+                f"sqlite:///{Path(temporary_directory) / 'registration-test.db'}",
+                connect_args={"check_same_thread": False},
+            )
+            Base.metadata.create_all(bind=test_engine)
+            test_session_local = sessionmaker(bind=test_engine)
+
+            try:
+                with test_session_local() as db:
+                    db.add(ResearchPaper(
+                        title="Legacy paper",
+                        filename="legacy.pdf",
+                        stored_filename="legacy.pdf",
+                        file_path=str(Path(temporary_directory) / "legacy.pdf"),
+                        summary="Legacy summary",
+                        pages=1,
+                    ))
+                    db.commit()
+                    with (
+                        patch.dict(
+                            "os.environ",
+                            {
+                                "SEND_VERIFICATION_EMAIL": "false",
+                                "SMTP_HOST": "",
+                                "SMTP_FROM": "",
+                            },
+                        ),
+                        patch.object(auth, "_send_email") as send_email,
+                    ):
+                        result = auth.register(
+                            Credentials(email="person@example.com", password="secure-password-123"),
+                            db,
+                        )
+                        login_result = auth.login(
+                            auth.LoginCredentials(
+                                email="person@example.com",
+                                password="secure-password-123",
+                            ),
+                            Response(),
+                            db,
+                        )
+
+                    user = db.query(User).filter(User.email == "person@example.com").one()
+                    legacy_paper = db.query(ResearchPaper).one()
+                    self.assertIn("ready", result["message"])
+                    self.assertTrue(user.email_verified)
+                    self.assertEqual(legacy_paper.user_id, user.id)
+                    self.assertEqual(login_result["user"]["id"], user.id)
+                    self.assertEqual(
+                        db.query(auth.AuthToken)
+                        .filter(auth.AuthToken.purpose == "email_verification")
+                        .count(),
+                        0,
+                    )
+                    send_email.assert_not_called()
+            finally:
+                Base.metadata.drop_all(bind=test_engine)
+                test_engine.dispose()
+
     def test_password_hash_verifies_only_matching_password(self):
         stored_hash = _hash_password("a-long-example-password")
 

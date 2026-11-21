@@ -43,6 +43,7 @@ export default function AuthGate({
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
   const isDark = colorMode === "dark";
   const [emailConfigured, setEmailConfigured] = useState(null);
+  const [verificationEmailEnabled, setVerificationEmailEnabled] = useState(true);
   const [smsEnabled, setSmsEnabled] = useState(false);
   const [oauthProviders, setOauthProviders] = useState([]);
   const [busy, setBusy] = useState(false);
@@ -80,6 +81,7 @@ export default function AuthGate({
             },
           ]);
           setEmailConfigured(config.email_configured === true);
+          setVerificationEmailEnabled(config.verification_email_enabled !== false);
           setSmsEnabled(config.sms_enabled === true);
         }
       })
@@ -87,6 +89,7 @@ export default function AuthGate({
         if (active) {
           setOauthProviders([]);
           setEmailConfigured(null);
+          setVerificationEmailEnabled(true);
           setSmsEnabled(false);
         }
       });
@@ -442,7 +445,7 @@ export default function AuthGate({
               </span>
             </label>
           )}
-          {isRegister && emailConfigured === false && (
+          {isRegister && verificationEmailEnabled && emailConfigured === false && (
             <p className="auth-message auth-warning" role="status">
               The backend is not detecting SMTP settings. Confirm SMTP_HOST and SMTP_FROM in
               backend/.env, then restart the backend.
@@ -500,7 +503,7 @@ export default function AuthGate({
           </p>
         )}
 
-        {isLogin && !isPhoneLogin && (
+        {isLogin && !isPhoneLogin && verificationEmailEnabled && (
           <div className="auth-help-links">
             <button type="button" onClick={resendVerification} disabled={!email || busy}>
               Resend verification email

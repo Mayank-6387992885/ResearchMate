@@ -46,7 +46,7 @@ Turn dense PDFs into clear, section-by-section summaries—and keep every paper 
 
 ### Before you begin
 
-You’ll need **Python**, **Node.js/npm**, **Ollama**, and an SMTP account to verify new users and send password-reset emails.
+You’ll need **Python**, **Node.js/npm**, and **Ollama**. SMTP is optional when signup verification is disabled; it is required for verification emails and password-reset emails.
 
 ### 1 · Configure email
 
@@ -56,7 +56,7 @@ Create your local environment file:
 Copy-Item backend\.env.example backend\.env
 ```
 
-Open `backend\.env` and add your SMTP settings:
+By default, the example file sets `SEND_VERIFICATION_EMAIL=false`, so new local accounts are immediately usable without SMTP. To require email verification, set `SEND_VERIFICATION_EMAIL=true` and add your SMTP settings:
 
 ```dotenv
 SMTP_HOST=your-smtp-host
@@ -68,6 +68,10 @@ SMTP_USE_SSL=false
 ```
 
 > **Keep credentials private.** Store real values in `backend\.env` only—never commit or share them. Restart the backend after changing environment settings.
+
+When verification email is disabled, newly registered accounts are marked verified and can sign in immediately. Existing accounts are not changed. Password-reset emails still require SMTP.
+
+Local development stores PDFs in `backend\uploads\research_papers\` when Supabase is not configured. To use Supabase Storage locally, set `SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY` in `backend\.env`; set both or leave both blank.
 
 ### 2 · Prepare the AI model
 
@@ -99,9 +103,26 @@ npm install
 npm run dev
 ```
 
-Visit [localhost:5173](http://localhost:5173), create an account, and verify your email.
+Visit [localhost:5173](http://localhost:5173) and create an account.
 
-> **First account?** When its email is verified, existing papers from the previous shared library are assigned to that account.
+> **First account?** When the first account becomes verified, existing papers from the previous shared library are assigned to that account.
+
+With `SEND_VERIFICATION_EMAIL=false`, create an account and sign in directly; the email-verification step is skipped.
+
+---
+
+## Deploy to Render
+
+The root `render.yaml` defines a FastAPI web service, a static Vite site, and a PostgreSQL database. In Render, create a new Blueprint from this repository and apply the configuration. The Blueprint uses Render's free plans; check current free-tier limits before relying on them for persistent production data.
+
+In the API service's environment, configure:
+
+- `OLLAMA_URL`: URL of a reachable Ollama-compatible `/api/generate` endpoint. The local default `http://localhost:11434/api/generate` will not reach an Ollama process running on your computer from Render.
+- `SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY`: set both to enable durable PDF storage. If omitted, PDFs use the service's local filesystem and may not survive redeploys or instance replacement.
+- `SEND_VERIFICATION_EMAIL`: leave `false` to allow sign-up without SMTP, or set it to `true` and configure `SMTP_HOST`, `SMTP_PORT`, `SMTP_USERNAME`, `SMTP_PASSWORD`, `SMTP_FROM`, and optionally `SMTP_USE_SSL`.
+- `FRONTEND_URL` and `VITE_API_BASE_URL`: the Blueprint sets these for its default Render service names. If Render assigns different service URLs, update both to the actual frontend and API URLs.
+
+Set `AUTH_COOKIE_SECURE=true` when serving the frontend over HTTPS. The Render Blueprint enables this setting.
 
 ---
 
@@ -109,7 +130,7 @@ Visit [localhost:5173](http://localhost:5173), create an account, and verify you
 
 ## 🔐 Account & sign-in
 
-Email and password sign-in is ready once SMTP is configured. To add social sign-in, create an OAuth app with the provider and add its credentials to `backend\.env`.
+Email and password sign-in works without SMTP when signup verification is disabled. Configure SMTP to send verification links or password-reset emails. To add social sign-in, create an OAuth app with the provider and add its credentials to `backend\.env`.
 
 On the sign-in page, **Remember me** keeps the session active for 14 days and remembers the email on that device. Without it, the session expires after 12 hours and the cookie is cleared when the browser session ends. Passwords are never stored in ResearchMate browser storage; the sign-in form supports your browser’s password manager for securely saving and autofilling them.
 
@@ -154,8 +175,8 @@ All paper and analysis endpoints require a signed-in account.
 
 | Method | Endpoint | What it does |
 |---|---|---|
-| `GET` | `/auth/config` | Check enabled sign-in options |
-| `POST` | `/auth/register` | Create an account and send verification |
+| `GET` | `/auth/config` | Check enabled sign-in options and email-verification setting |
+| `POST` | `/auth/register` | Create an account; send verification only when enabled |
 | `POST` | `/auth/login` | Sign in with email and password |
 | `POST` | `/auth/phone/login/code` | Request a phone sign-in code |
 | `POST` | `/auth/phone/login/verify` | Verify a phone sign-in code |
@@ -176,7 +197,7 @@ All paper and analysis endpoints require a signed-in account.
 | Data | Location |
 |---|---|
 | Database | `backend\researchmate.db` |
-| Uploaded PDFs | `backend\uploads\research_papers\` |
+| Uploaded PDFs | `backend\uploads\research_papers\` locally without Supabase; Supabase Storage when configured |
 | Summaries | Stored with paper records; downloadable as `.txt` |
 | Frontend API URL | Defaults to `http://localhost:8000`; set `VITE_API_BASE_URL` when deploying elsewhere |
 

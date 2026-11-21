@@ -652,6 +652,7 @@ def auth_config():
             os.getenv("SMTP_HOST", "").strip()
             and os.getenv("SMTP_FROM", "").strip()
         ),
+        "verification_email_enabled": _verification_email_enabled(),
         "google_enabled": bool(
             os.getenv("GOOGLE_CLIENT_ID")
             and os.getenv("GOOGLE_CLIENT_SECRET")
@@ -672,32 +673,50 @@ def auth_config():
     }
 
 
+def _verification_email_enabled() -> bool:
+    return os.getenv("SEND_VERIFICATION_EMAIL", "true").strip().lower() not in {
+        "false", "0", "no", "off",
+    }
+
+
 @router.post("/register", status_code=201)
 def register(payload: Credentials, db: Session = Depends(get_db)):
     email = str(payload.email).strip().lower()
     if db.query(User.id).filter(User.email == email).first():
         raise HTTPException(status_code=409, detail="An account with this email already exists.")
-    _email_configuration()
 
-    verification_token = secrets.token_urlsafe(48)
+    send_verification_email = _verification_email_enabled()
+    if send_verification_email:
+        _email_configuration()
     try:
-        user = User(email=email, password_hash=_hash_password(payload.password))
+        user = User(
+            email=email,
+            password_hash=_hash_password(payload.password),
+            email_verified=not send_verification_email,
+        )
         db.add(user)
         db.flush()
-        db.add(AuthToken(
-            user_id=user.id,
-            token_hash=_token_digest(verification_token),
-            purpose="email_verification",
-            expires_at=_utcnow() + timedelta(hours=VERIFICATION_HOURS),
-        ))
-        verification_url = f"{FRONTEND_URL}/?verify_email={verification_token}"
-        plain_text, html_body = _verification_email_content(verification_url)
-        _send_email(
-            email,
-            "Verify your ResearchMate account",
-            plain_text,
-            html_body,
-        )
+        if (
+            not send_verification_email
+            and db.query(User.id).filter(User.email_verified.is_(True)).count() == 1
+        ):
+            _claim_legacy_papers(db, user.id)
+        if send_verification_email:
+            verification_token = secrets.token_urlsafe(48)
+            db.add(AuthToken(
+                user_id=user.id,
+                token_hash=_token_digest(verification_token),
+                purpose="email_verification",
+                expires_at=_utcnow() + timedelta(hours=VERIFICATION_HOURS),
+            ))
+            verification_url = f"{FRONTEND_URL}/?verify_email={verification_token}"
+            plain_text, html_body = _verification_email_content(verification_url)
+            _send_email(
+                email,
+                "Verify your ResearchMate account",
+                plain_text,
+                html_body,
+            )
         db.commit()
     except (OSError, smtplib.SMTPException) as exc:
         db.rollback()
@@ -709,7 +728,9 @@ def register(payload: Credentials, db: Session = Depends(get_db)):
         db.rollback()
         raise
 
-    return {"message": "Check your email for an account verification link."}
+    if send_verification_email:
+        return {"message": "Check your email for an account verification link."}
+    return {"message": "Your account is ready. You can now sign in."}
 
 
 @router.post("/login")
