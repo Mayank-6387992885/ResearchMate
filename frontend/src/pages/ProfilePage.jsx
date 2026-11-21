@@ -594,6 +594,9 @@ function ProfileSelect({
 export default function ProfilePage({ user, activePage, onNavigate, onUserUpdated }) {
   const [settings, setSettings] = useState(null);
   const [adminSettings, setAdminSettings] = useState(null);
+  const [adminBusy, setAdminBusy] = useState(false);
+  const [adminError, setAdminError] = useState("");
+  const [adminNotice, setAdminNotice] = useState("");
   const [selectedSection, setSelectedSectionState] = useState(() => {
     const savedSection = window.sessionStorage.getItem(SETTINGS_SECTION_STORAGE_KEY);
     return SETTINGS_SECTION_IDS.has(savedSection) ? savedSection : null;
@@ -847,9 +850,14 @@ export default function ProfilePage({ user, activePage, onNavigate, onUserUpdate
   }
 
   async function saveAdminSettings(enabled) {
-    setError("");
-    setNotice("");
-    setBusy(true);
+    setAdminError("");
+    setAdminNotice("");
+    setAdminBusy(true);
+
+    const previous = adminSettings;
+    // Optimistic UI update so the toggle state responds instantly to the click
+    setAdminSettings({ ...(adminSettings || {}), verification_email_enabled: enabled });
+
     try {
       const data = await readResponse(
         await apiFetch(API.adminSettings, {
@@ -860,15 +868,16 @@ export default function ProfilePage({ user, activePage, onNavigate, onUserUpdate
         "Could not save administrator settings.",
       );
       setAdminSettings(data);
-      setNotice(
+      setAdminNotice(
         enabled
-          ? "Email verification is now required project-wide."
-          : "Email verification is now disabled project-wide. Users can sign up and sign in immediately.",
+          ? "Email verification is now REQUIRED project-wide."
+          : "Email verification is now DISABLED project-wide. Users can sign in without email confirmation.",
       );
     } catch (requestError) {
-      setError(requestError.message || "Could not save administrator settings.");
+      setAdminSettings(previous);
+      setAdminError(requestError.message || "Could not save administrator settings.");
     } finally {
-      setBusy(false);
+      setAdminBusy(false);
     }
   }
 
@@ -1389,7 +1398,7 @@ export default function ProfilePage({ user, activePage, onNavigate, onUserUpdate
                 </p>
               )}
               {(user.is_admin || adminSettings !== null) && (
-                <>
+                <div className="admin-settings-panel" style={{ marginTop: "24px" }}>
                   <div className="profile-settings-title settings-password-title">
                     <span className="profile-detail-icon"><ShieldCheck size={18} /></span>
                     <div>
@@ -1397,23 +1406,50 @@ export default function ProfilePage({ user, activePage, onNavigate, onUserUpdate
                       <p>Command whether email verification is required across the project.</p>
                     </div>
                   </div>
+
+                  {adminNotice && (
+                    <div className="auth-message auth-notice" style={{ margin: "12px 0" }} role="status">
+                      {adminNotice}
+                    </div>
+                  )}
+                  {adminError && (
+                    <div className="auth-message error-message" style={{ margin: "12px 0" }} role="alert">
+                      {adminError}
+                    </div>
+                  )}
+
                   <p className="profile-provider-note">
                     {adminSettings?.verification_email_enabled
                       ? "Email verification is currently REQUIRED. New registrations and unverified accounts require email confirmation (SMTP required)."
                       : "Email verification is currently DISABLED. Accounts are verified immediately and can log in without email confirmation."}
                   </p>
+
                   <div className="settings-toggle-list">
-                    <label className="settings-toggle">
-                      <span>Require email verification project-wide</span>
+                    <label
+                      className="settings-toggle"
+                      style={{ cursor: "pointer", userSelect: "none" }}
+                      onClick={(e) => {
+                        if (e.target.tagName !== "INPUT") {
+                          e.preventDefault();
+                          const current = adminSettings?.verification_email_enabled === true;
+                          saveAdminSettings(!current);
+                        }
+                      }}
+                    >
+                      <span style={{ fontWeight: 500 }}>
+                        Require email verification project-wide
+                        {adminBusy && <small style={{ marginLeft: "10px", opacity: 0.7 }}>(Saving...)</small>}
+                      </span>
                       <input
                         type="checkbox"
                         checked={adminSettings?.verification_email_enabled === true}
-                        disabled={busy || adminSettings === null}
+                        disabled={adminBusy}
+                        style={{ cursor: "pointer", width: "18px", height: "18px" }}
                         onChange={(event) => saveAdminSettings(event.target.checked)}
                       />
                     </label>
                   </div>
-                </>
+                </div>
               )}
             </div>
           )}
