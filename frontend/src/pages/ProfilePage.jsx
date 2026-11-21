@@ -675,16 +675,17 @@ export default function ProfilePage({ user, activePage, onNavigate, onUserUpdate
       .finally(() => {
         if (active) setLoading(false);
       });
-    if (user.is_admin) {
-      apiFetch(API.adminSettings)
-        .then((response) => readResponse(response, "Could not load administrator settings."))
-        .then((data) => {
-          if (active) setAdminSettings(data);
-        })
-        .catch((requestError) => {
-          if (active) setError(requestError.message || "Could not load administrator settings.");
-        });
-    }
+    apiFetch(API.adminSettings)
+      .then((response) => {
+        if (!response.ok) return null;
+        return response.json();
+      })
+      .then((data) => {
+        if (active && data && typeof data.verification_email_enabled === "boolean") {
+          setAdminSettings(data);
+        }
+      })
+      .catch(() => {});
     return () => {
       active = false;
     };
@@ -1387,7 +1388,7 @@ export default function ProfilePage({ user, activePage, onNavigate, onUserUpdate
                   SMS sign-in needs Twilio Verify credentials in backend/.env and a backend restart.
                 </p>
               )}
-              {user.is_admin && (
+              {(user.is_admin || adminSettings !== null) && (
                 <>
                   <div className="profile-settings-title settings-password-title">
                     <span className="profile-detail-icon"><ShieldCheck size={18} /></span>
