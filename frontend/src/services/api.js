@@ -1,42 +1,71 @@
-const API_BASE_URL = (
-  import.meta.env.VITE_API_BASE_URL || "http://localhost:8000"
-).replace(/\/$/, "");
+export const RENDER_API_URL = "https://researchmate-api-0e78.onrender.com";
+export const LOCAL_API_URL = "http://localhost:8000";
+const API_TARGET_STORAGE_KEY = "researchmate.api_target";
 
-export const API_BASE = API_BASE_URL;
+export function getApiBaseUrl() {
+  try {
+    const override = window.localStorage.getItem(API_TARGET_STORAGE_KEY);
+    if (override === "local") return LOCAL_API_URL;
+    if (override === "render") return RENDER_API_URL;
+    if (override && override.startsWith("http")) return override.replace(/\/$/, "");
+  } catch {}
+  return (
+    import.meta.env.VITE_API_BASE_URL || LOCAL_API_URL
+  ).replace(/\/$/, "");
+}
+
+export function setApiTarget(target) {
+  try {
+    if (!target) {
+      window.localStorage.removeItem(API_TARGET_STORAGE_KEY);
+    } else {
+      window.localStorage.setItem(API_TARGET_STORAGE_KEY, target);
+    }
+  } catch (error) {
+    console.warn("Could not save API target override.", error);
+  }
+}
+
+export function isLocalApi() {
+  const current = getApiBaseUrl();
+  return current.includes("localhost") || current.includes("127.0.0.1");
+}
+
+export const API_BASE = getApiBaseUrl();
 
 export const API = {
-  authConfig: `${API_BASE_URL}/auth/config`,
-  adminSettings: `${API_BASE_URL}/auth/admin/settings`,
-  currentUser: `${API_BASE_URL}/auth/me`,
-  profile: `${API_BASE_URL}/auth/profile`,
-  profileImage: `${API_BASE_URL}/auth/profile/image`,
-  profileNotifications: `${API_BASE_URL}/auth/profile/notifications`,
-  profilePrivacy: `${API_BASE_URL}/auth/profile/privacy`,
-  register: `${API_BASE_URL}/auth/register`,
-  login: `${API_BASE_URL}/auth/login`,
-  sendPhoneLoginCode: `${API_BASE_URL}/auth/phone/login/code`,
-  verifyPhoneLoginCode: `${API_BASE_URL}/auth/phone/login/verify`,
-  sendPhoneLinkCode: `${API_BASE_URL}/auth/phone/link/code`,
-  verifyPhoneLinkCode: `${API_BASE_URL}/auth/phone/link/verify`,
-  changePassword: `${API_BASE_URL}/auth/password`,
-  logout: `${API_BASE_URL}/auth/logout`,
-  verifyEmail: `${API_BASE_URL}/auth/verify-email`,
-  resendVerification: `${API_BASE_URL}/auth/resend-verification`,
-  forgotPassword: `${API_BASE_URL}/auth/forgot-password`,
-  resetPassword: `${API_BASE_URL}/auth/reset-password`,
-  googleStart: `${API_BASE_URL}/auth/google/start`,
-  githubStart: `${API_BASE_URL}/auth/github/start`,
-  linkedinStart: `${API_BASE_URL}/auth/linkedin/start`,
-  upload: `${API_BASE_URL}/upload`,
-  progress: (taskId) => `${API_BASE_URL}/progress/${taskId}`,
-  papers: `${API_BASE_URL}/papers`,
-  getPaper: (id) => `${API_BASE_URL}/papers/${id}`,
-  savePaper: (id) => `${API_BASE_URL}/papers/${id}/save`,
-  updatePaper: (id) => `${API_BASE_URL}/papers/${id}`,
-  classifyPaper: (id) => `${API_BASE_URL}/papers/${id}/classify`,
-  downloadPaper: (id) => `${API_BASE_URL}/papers/${id}/download`,
-  downloadSummary: (id) => `${API_BASE_URL}/papers/${id}/download-summary`,
-  deletePaper: (id) => `${API_BASE_URL}/papers/${id}`,
+  get authConfig() { return `${getApiBaseUrl()}/auth/config`; },
+  get adminSettings() { return `${getApiBaseUrl()}/auth/admin/settings`; },
+  get currentUser() { return `${getApiBaseUrl()}/auth/me`; },
+  get profile() { return `${getApiBaseUrl()}/auth/profile`; },
+  get profileImage() { return `${getApiBaseUrl()}/auth/profile/image`; },
+  get profileNotifications() { return `${getApiBaseUrl()}/auth/profile/notifications`; },
+  get profilePrivacy() { return `${getApiBaseUrl()}/auth/profile/privacy`; },
+  get register() { return `${getApiBaseUrl()}/auth/register`; },
+  get login() { return `${getApiBaseUrl()}/auth/login`; },
+  get sendPhoneLoginCode() { return `${getApiBaseUrl()}/auth/phone/login/code`; },
+  get verifyPhoneLoginCode() { return `${getApiBaseUrl()}/auth/phone/login/verify`; },
+  get sendPhoneLinkCode() { return `${getApiBaseUrl()}/auth/phone/link/code`; },
+  get verifyPhoneLinkCode() { return `${getApiBaseUrl()}/auth/phone/link/verify`; },
+  get changePassword() { return `${getApiBaseUrl()}/auth/password`; },
+  get logout() { return `${getApiBaseUrl()}/auth/logout`; },
+  get verifyEmail() { return `${getApiBaseUrl()}/auth/verify-email`; },
+  get resendVerification() { return `${getApiBaseUrl()}/auth/resend-verification`; },
+  get forgotPassword() { return `${getApiBaseUrl()}/auth/forgot-password`; },
+  get resetPassword() { return `${getApiBaseUrl()}/auth/reset-password`; },
+  get googleStart() { return `${getApiBaseUrl()}/auth/google/start`; },
+  get githubStart() { return `${getApiBaseUrl()}/auth/github/start`; },
+  get linkedinStart() { return `${getApiBaseUrl()}/auth/linkedin/start`; },
+  get upload() { return `${getApiBaseUrl()}/upload`; },
+  progress: (taskId) => `${getApiBaseUrl()}/progress/${taskId}`,
+  get papers() { return `${getApiBaseUrl()}/papers`; },
+  getPaper: (id) => `${getApiBaseUrl()}/papers/${id}`,
+  savePaper: (id) => `${getApiBaseUrl()}/papers/${id}/save`,
+  updatePaper: (id) => `${getApiBaseUrl()}/papers/${id}`,
+  classifyPaper: (id) => `${getApiBaseUrl()}/papers/${id}/classify`,
+  downloadPaper: (id) => `${getApiBaseUrl()}/papers/${id}/download`,
+  downloadSummary: (id) => `${getApiBaseUrl()}/papers/${id}/download-summary`,
+  deletePaper: (id) => `${getApiBaseUrl()}/papers/${id}`,
 };
 
 const TOKEN_STORAGE_KEY = "researchmate.session_token";

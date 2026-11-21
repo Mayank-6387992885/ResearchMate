@@ -1,7 +1,11 @@
 {
   "scripts": {
     "dev": "vite",
+    "dev:local": "vite --mode devlocal",
+    "dev:render": "vite --mode render",
     "build": "vite build",
+    "build:local": "vite build --mode devlocal",
+    "build:render": "vite build --mode render",
     "preview": "vite preview"
   },
   "dependencies": {

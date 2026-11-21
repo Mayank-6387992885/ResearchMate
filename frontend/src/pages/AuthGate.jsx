@@ -3,7 +3,7 @@ import {
   ArrowLeft, ArrowRight, BookOpen, Eye, EyeOff, LoaderCircle, LockKeyhole, Mail, Moon, Phone, Sparkles, Sun, UserRound,
 } from "lucide-react";
 
-import { API, apiFetch, setStoredToken } from "../services/api";
+import { API, apiFetch, setStoredToken, isLocalApi, setApiTarget } from "../services/api";
 import TimedFeedback from "../components/TimedFeedback";
 
 const REMEMBERED_EMAIL_KEY = "researchmate.rememberedEmail";
@@ -563,6 +563,21 @@ export default function AuthGate({
             {isPhoneLogin ? "Sign up" : isLogin ? "Create an account" : "Sign in"}
           </button>
         </p>
+
+        <div style={{ marginTop: "14px", paddingTop: "10px", borderTop: "1px solid var(--border-color, rgba(0,0,0,0.08))", fontSize: "12px", textAlign: "center", color: "var(--text-secondary, #64748b)", display: "flex", alignItems: "center", justifyContent: "center", gap: "8px" }}>
+          <span>API Target: <strong style={{ color: isLocalApi() ? "#059669" : "#4f46e5" }}>{isLocalApi() ? "Local (:8000)" : "Cloud (Render)"}</strong></span>
+          <button
+            type="button"
+            style={{ background: "none", border: "none", color: "var(--accent-color, #4f46e5)", cursor: "pointer", fontSize: "12px", textDecoration: "underline", padding: 0 }}
+            onClick={() => {
+              const next = isLocalApi() ? "render" : "local";
+              setApiTarget(next);
+              window.location.reload();
+            }}
+          >
+            {isLocalApi() ? "Switch to Cloud" : "Switch to Local"}
+          </button>
+        </div>
       </section>
     </main>
   );

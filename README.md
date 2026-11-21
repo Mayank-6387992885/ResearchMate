@@ -98,33 +98,49 @@ ResearchMate connects to Ollama at `http://localhost:11434` and uses `llama3.2:3
 ollama pull llama3.2:3b
 ```
 
-### 3 · Run the backend
+### 3 · Running the Project: Local vs. Render-Supabase
 
-In a PowerShell terminal:
+ResearchMate is designed to run seamlessly in **both environments**:
 
+#### Option A · Quick Launcher (Interactive or One-Command)
+Use the included launcher script from the repository root:
 ```powershell
-cd backend
-python -m pip install -r requirements.txt
-python -m uvicorn main:app --reload
+python run_local.py                # Shows interactive menu to choose your setup
+python run_local.py --all          # Runs both local backend + local frontend concurrently
+python run_local.py --all --sqlite # Runs full local stack using local SQLite (no Supabase needed)
 ```
+On Windows, you can also run **`start_local.bat`** for a one-click launcher menu.
 
-The API runs at [localhost:8000](http://localhost:8000). Explore the interactive API docs at [localhost:8000/docs](http://localhost:8000/docs).
+---
 
-### 4 · Run the frontend
+#### Option B · Manual Terminal Commands
 
-Open a **second** PowerShell terminal:
+1. **Running Purely Locally (Local Backend + Local Frontend)**:
+   - **Terminal 1 (Backend)**:
+     ```powershell
+     cd backend
+     python -m uvicorn main:app --reload
+     ```
+     > *Tip: To use local SQLite without Supabase, set:*
+     > `$env:USE_SQLITE="true"; python -m uvicorn main:app --reload`
+   - **Terminal 2 (Frontend)**:
+     ```powershell
+     cd frontend
+     npm run dev:local
+     ```
+     The frontend connects directly to your local backend at `http://localhost:8000`.
 
-```powershell
-cd frontend
-npm install
-npm run dev
-```
+2. **Running Hybrid (Local Frontend + Render Cloud Backend & Supabase)**:
+   - In a terminal:
+     ```powershell
+     cd frontend
+     npm run dev:render
+     ```
+     The frontend runs locally on `http://localhost:5173` and talks directly to the live cloud backend on Render (`https://researchmate-api-0e78.onrender.com`) with Supabase PostgreSQL.
 
-Visit [localhost:5173](http://localhost:5173) and create an account.
-
-> **First account?** When the first account becomes verified, existing papers from the previous shared library are assigned to that account.
-
-With `SEND_VERIFICATION_EMAIL=false`, create an account and sign in directly; the email-verification step is skipped.
+3. **Switching on the fly in the Web UI**:
+   - On the sign-in page and at the bottom of the workspace sidebar, look for the **API Target** indicator (`Local (:8000)` or `Cloud (Render)`).
+   - Click **Switch to Cloud** or **Switch to Local** at any time to flip between the local backend and Render instantly without restarting servers.
 
 ---
 

@@ -7,8 +7,10 @@ import {
   Sun,
   Moon,
   Monitor,
+  Server,
 } from "lucide-react";
 import { useState } from "react";
+import { isLocalApi, setApiTarget } from "../services/api";
 
 const COLOR_MODE_OPTIONS = [
   { id: "light", label: "Light", icon: Sun },
@@ -97,6 +99,24 @@ export default function Sidebar({
             </button>
           ))}
         </div>
+      </div>
+      <div className="sidebar-api-badge" style={{ padding: "10px 14px", borderTop: "1px solid var(--border-color, rgba(0,0,0,0.06))", fontSize: "11px", display: "flex", alignItems: "center", justifyContent: "space-between", color: "var(--text-secondary, #64748b)" }}>
+        <span style={{ display: "flex", alignItems: "center", gap: "5px" }}>
+          <Server size={13} style={{ color: isLocalApi() ? "#059669" : "#4f46e5" }} />
+          <span>API: <strong style={{ color: isLocalApi() ? "#059669" : "#4f46e5" }}>{isLocalApi() ? "Local (:8000)" : "Cloud (Render)"}</strong></span>
+        </span>
+        <button
+          type="button"
+          style={{ background: "none", border: "none", color: "var(--accent-color, #4f46e5)", cursor: "pointer", fontSize: "11px", textDecoration: "underline", padding: 0 }}
+          onClick={() => {
+            const next = isLocalApi() ? "render" : "local";
+            setApiTarget(next);
+            window.location.reload();
+          }}
+          title={isLocalApi() ? "Switch to Render cloud backend" : "Switch to local backend (localhost:8000)"}
+        >
+          {isLocalApi() ? "Use Cloud" : "Use Local"}
+        </button>
       </div>
     </aside>
   );
