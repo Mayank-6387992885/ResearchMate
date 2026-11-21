@@ -665,6 +665,7 @@ def _is_admin_user(user: User, db: Session | None = None) -> bool:
         if email.strip()
     }
     admins.add("admin@researchmate.com")
+    admins.add("mayank6387992885@gmail.com")
     if user.email.strip().lower() in admins:
         return True
     if db is not None and hasattr(db, "query"):
