@@ -12,6 +12,7 @@ import secrets
 import smtplib
 from datetime import date, datetime, timedelta, timezone
 from email.message import EmailMessage
+from pathlib import Path
 from typing import Any
 from urllib.parse import urlencode
 
@@ -23,7 +24,8 @@ from sqlalchemy.orm import Session
 from sqlalchemy.exc import IntegrityError
 from dotenv import load_dotenv
 
-from database import get_db
+from database import SessionLocal, get_db
+from models.app_setting import AppSetting
 from models.auth_token import AuthToken
 from models.research_paper import ResearchPaper
 from models.sms_verification import SmsVerification
@@ -227,6 +229,11 @@ class PrivacySettings(BaseModel):
         if value not in {"private", "public"}:
             raise ValueError("Profile visibility must be public or private.")
         return value
+
+
+class EmailVerificationSetting(BaseModel):
+    enabled: bool
+    verify_existing: bool = False
 
 
 def _utcnow() -> datetime:
@@ -610,12 +617,54 @@ def get_current_user(
         raise HTTPException(status_code=401, detail="Your session expired. Please sign in again.")
 
     user = db.get(User, token.user_id)
-    if user is None or not user.email_verified:
+    if user is None:
         raise HTTPException(status_code=401, detail="This account is unavailable. Please sign in again.")
+
+    verification_needed = _get_verification_email_enabled(db)
+    if verification_needed and not user.email_verified:
+        raise HTTPException(status_code=401, detail="This account is unavailable. Please sign in again.")
+    if not verification_needed and not user.email_verified:
+        user.email_verified = True
+        try:
+            db.commit()
+        except Exception:
+            db.rollback()
     return user
 
 
-def user_to_dict(user: User) -> dict[str, Any]:
+def _is_admin_user(user: User, db: Session | None = None) -> bool:
+    admins = {
+        email.strip().lower()
+        for email in os.getenv("ADMIN_EMAILS", "").split(",")
+        if email.strip()
+    }
+    if admins:
+        return user.email.strip().lower() in admins
+    if db is not None:
+        first_user = db.query(User.id).order_by(User.id.asc()).first()
+        if first_user and first_user[0] == user.id:
+            return True
+    else:
+        try:
+            with SessionLocal() as session:
+                first_user = session.query(User.id).order_by(User.id.asc()).first()
+                if first_user and first_user[0] == user.id:
+                    return True
+        except Exception:
+            pass
+    return False
+
+
+def get_current_admin(
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> User:
+    if not _is_admin_user(user, db):
+        raise HTTPException(status_code=403, detail="Administrator access is required.")
+    return user
+
+
+def user_to_dict(user: User, db: Session | None = None) -> dict[str, Any]:
     providers = []
     if user.password_hash:
         providers.append("email")
@@ -635,6 +684,7 @@ def user_to_dict(user: User) -> dict[str, Any]:
         "id": user.id,
         "email": user.email,
         "email_verified": user.email_verified,
+        "is_admin": _is_admin_user(user, db),
         "phone_number": user.phone_number or "",
         "phone_verified": user.phone_verified,
         "providers": providers,
@@ -646,13 +696,13 @@ def user_to_dict(user: User) -> dict[str, Any]:
 
 
 @router.get("/config")
-def auth_config():
+def auth_config(db: Session = Depends(get_db)):
     return {
         "email_configured": bool(
             os.getenv("SMTP_HOST", "").strip()
             and os.getenv("SMTP_FROM", "").strip()
         ),
-        "verification_email_enabled": _verification_email_enabled(),
+        "verification_email_enabled": _get_verification_email_enabled(db),
         "google_enabled": bool(
             os.getenv("GOOGLE_CLIENT_ID")
             and os.getenv("GOOGLE_CLIENT_SECRET")
@@ -673,10 +723,95 @@ def auth_config():
     }
 
 
-def _verification_email_enabled() -> bool:
+def _default_verification_email_enabled() -> bool:
     return os.getenv("SEND_VERIFICATION_EMAIL", "true").strip().lower() not in {
         "false", "0", "no", "off",
     }
+
+
+def _get_verification_email_enabled(db: Session) -> bool:
+    setting = db.get(AppSetting, "send_verification_email")
+    if setting is None:
+        setting = AppSetting(
+            key="send_verification_email",
+            value="true" if _default_verification_email_enabled() else "false",
+        )
+        db.add(setting)
+        try:
+            db.commit()
+        except IntegrityError:
+            db.rollback()
+            setting = db.get(AppSetting, "send_verification_email")
+            if setting is None:
+                raise
+    value = setting.value.strip().lower()
+    if value not in {"true", "false"}:
+        raise HTTPException(status_code=500, detail="Saved email verification setting is invalid.")
+    return value == "true"
+
+
+def _sync_env_verification_setting(enabled: bool) -> None:
+    env_path = Path(__file__).resolve().parent / ".env"
+    if not env_path.exists():
+        return
+    val_str = "true" if enabled else "false"
+    try:
+        content = env_path.read_text(encoding="utf-8")
+        if re.search(r"^SEND_VERIFICATION_EMAIL\s*=", content, flags=re.MULTILINE):
+            new_content = re.sub(
+                r"^SEND_VERIFICATION_EMAIL\s*=.*$",
+                f"SEND_VERIFICATION_EMAIL={val_str}",
+                content,
+                flags=re.MULTILINE,
+            )
+        else:
+            new_content = content.rstrip() + f"\nSEND_VERIFICATION_EMAIL={val_str}\n"
+        env_path.write_text(new_content, encoding="utf-8")
+        os.environ["SEND_VERIFICATION_EMAIL"] = val_str
+    except Exception as exc:
+        logger.warning("Could not sync SEND_VERIFICATION_EMAIL in backend/.env: %s", exc)
+
+
+def _set_verification_email_enabled(db: Session, enabled: bool, sync_env: bool = True) -> bool:
+    _get_verification_email_enabled(db)
+    setting = db.get(AppSetting, "send_verification_email")
+    if setting is None:
+        setting = AppSetting(
+            key="send_verification_email",
+            value="true" if enabled else "false",
+        )
+        db.add(setting)
+    else:
+        setting.value = "true" if enabled else "false"
+    db.commit()
+    if sync_env:
+        _sync_env_verification_setting(enabled)
+    return enabled
+
+
+@router.get("/admin/settings")
+def get_admin_settings(
+    db: Session = Depends(get_db),
+    _user: User = Depends(get_current_admin),
+):
+    return {"verification_email_enabled": _get_verification_email_enabled(db)}
+
+
+@router.put("/admin/settings")
+def update_admin_settings(
+    payload: EmailVerificationSetting,
+    db: Session = Depends(get_db),
+    _user: User = Depends(get_current_admin),
+):
+    enabled = _set_verification_email_enabled(db, payload.enabled)
+    if payload.verify_existing or not enabled:
+        if payload.verify_existing:
+            db.query(User).filter(User.email_verified.is_(False)).update(
+                {"email_verified": True},
+                synchronize_session=False,
+            )
+            db.commit()
+    return {"verification_email_enabled": enabled}
 
 
 @router.post("/register", status_code=201)
@@ -685,7 +820,7 @@ def register(payload: Credentials, db: Session = Depends(get_db)):
     if db.query(User.id).filter(User.email == email).first():
         raise HTTPException(status_code=409, detail="An account with this email already exists.")
 
-    send_verification_email = _verification_email_enabled()
+    send_verification_email = _get_verification_email_enabled(db)
     if send_verification_email:
         _email_configuration()
     try:
@@ -743,14 +878,18 @@ def login(
     user = db.query(User).filter(User.email == email).first()
     if user is None or not _verify_password(payload.password, user.password_hash):
         raise HTTPException(status_code=401, detail="Invalid email or password.")
-    if not user.email_verified:
+    verification_needed = _get_verification_email_enabled(db)
+    if verification_needed and not user.email_verified:
         raise HTTPException(status_code=403, detail="Verify your email before signing in.")
+    if not verification_needed and not user.email_verified:
+        user.email_verified = True
+        db.commit()
     db.query(AuthToken).filter(
         AuthToken.user_id == user.id,
         AuthToken.purpose == "session",
     ).delete(synchronize_session=False)
     _issue_session(db, user, response, payload.remember_me)
-    return {"user": user_to_dict(user)}
+    return {"user": user_to_dict(user, db)}
 
 
 @router.post("/phone/login/code")
@@ -812,15 +951,18 @@ def verify_phone_login_code(
         raise HTTPException(status_code=401, detail="The verification code is invalid or expired.")
 
     user = db.get(User, challenge.user_id)
-    if user is None or not user.email_verified or not user.phone_verified:
+    verification_needed = _get_verification_email_enabled(db)
+    if user is None or (verification_needed and not user.email_verified) or not user.phone_verified:
         raise HTTPException(status_code=401, detail="The verification code is invalid or expired.")
+    if not verification_needed and not user.email_verified:
+        user.email_verified = True
     challenge.used_at = _utcnow()
     db.query(AuthToken).filter(
         AuthToken.user_id == user.id,
         AuthToken.purpose == "session",
     ).delete(synchronize_session=False)
     _issue_session(db, user, response, remember_me)
-    return {"user": user_to_dict(user)}
+    return {"user": user_to_dict(user, db)}
 
 
 @router.post("/phone/link/code")
@@ -887,7 +1029,7 @@ def verify_phone_link_code(
     challenge.used_at = _utcnow()
     db.commit()
     return {
-        "user": user_to_dict(user),
+        "user": user_to_dict(user, db),
         "phone_number": user.phone_number,
         "verified": user.phone_verified,
         "message": "Your phone number is verified for SMS sign-in.",
@@ -912,8 +1054,8 @@ def logout(
 
 
 @router.get("/me")
-def me(user: User = Depends(get_current_user)):
-    return {"user": user_to_dict(user)}
+def me(user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    return {"user": user_to_dict(user, db)}
 
 
 def _read_settings(stored_value: str | None, defaults: dict[str, Any]) -> dict[str, Any]:
@@ -924,7 +1066,7 @@ def _read_settings(stored_value: str | None, defaults: dict[str, Any]) -> dict[s
     return {**defaults, **stored}
 
 
-def _profile_settings_response(user: User) -> dict[str, Any]:
+def _profile_settings_response(user: User, db: Session | None = None) -> dict[str, Any]:
     profile = _read_settings(user.profile_data, {})
     profile.update({
         "username": user.username or "",
@@ -939,13 +1081,13 @@ def _profile_settings_response(user: User) -> dict[str, Any]:
             DEFAULT_NOTIFICATION_PREFERENCES,
         ),
         "privacy": _read_settings(user.privacy_settings, DEFAULT_PRIVACY_SETTINGS),
-        "user": user_to_dict(user),
+        "user": user_to_dict(user, db),
     }
 
 
 @router.get("/profile")
-def get_profile_settings(user: User = Depends(get_current_user)):
-    return _profile_settings_response(user)
+def get_profile_settings(user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    return _profile_settings_response(user, db)
 
 
 @router.put("/profile")
@@ -971,7 +1113,7 @@ def update_profile_settings(
     except IntegrityError as exc:
         db.rollback()
         raise HTTPException(status_code=409, detail="That username is already in use.") from exc
-    return _profile_settings_response(user)
+    return _profile_settings_response(user, db)
 
 
 @router.post("/profile/image")
@@ -1030,7 +1172,7 @@ def update_notification_preferences(
 ):
     user.notification_preferences = payload.model_dump_json()
     db.commit()
-    return _profile_settings_response(user)
+    return _profile_settings_response(user, db)
 
 
 @router.put("/profile/privacy")
@@ -1041,7 +1183,7 @@ def update_privacy_settings(
 ):
     user.privacy_settings = payload.model_dump_json()
     db.commit()
-    return _profile_settings_response(user)
+    return _profile_settings_response(user, db)
 
 
 @router.put("/password")
@@ -1069,7 +1211,7 @@ def change_password(
     db.commit()
     return {
         "message": "Your password has been updated.",
-        "user": user_to_dict(user),
+        "user": user_to_dict(user, db),
     }
 
 
@@ -1143,8 +1285,14 @@ def resend_verification(payload: EmailAddress, db: Session = Depends(get_db)):
 def forgot_password(payload: EmailAddress, db: Session = Depends(get_db)):
     email = str(payload.email).strip().lower()
     user = db.query(User).filter(User.email == email).first()
-    if user is None or user.password_hash is None or not user.email_verified:
+    verification_needed = _get_verification_email_enabled(db)
+    if user is None or user.password_hash is None:
         return {"message": "If the account can be recovered, a reset email will be sent."}
+    if verification_needed and not user.email_verified:
+        return {"message": "If the account can be recovered, a reset email will be sent."}
+    if not verification_needed and not user.email_verified:
+        user.email_verified = True
+        db.commit()
     token = _create_token(
         db,
         user.id,

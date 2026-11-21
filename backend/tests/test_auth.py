@@ -6,7 +6,7 @@ from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 from unittest.mock import Mock, patch
 
-from fastapi import Response
+from fastapi import HTTPException, Response
 from pydantic import ValidationError
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
@@ -22,6 +22,20 @@ from models.user import User
 
 
 class AuthHelperTests(unittest.TestCase):
+    def read_auth_config(self):
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            test_engine = create_engine(
+                f"sqlite:///{Path(temporary_directory) / 'config-test.db'}",
+                connect_args={"check_same_thread": False},
+            )
+            Base.metadata.create_all(bind=test_engine)
+            try:
+                with sessionmaker(bind=test_engine)() as db:
+                    return auth.auth_config(db)
+            finally:
+                Base.metadata.drop_all(bind=test_engine)
+                test_engine.dispose()
+
     def test_registration_without_verification_email_can_sign_in(self):
         with tempfile.TemporaryDirectory() as temporary_directory:
             test_engine = create_engine(
@@ -104,10 +118,10 @@ class AuthHelperTests(unittest.TestCase):
 
     def test_auth_config_reports_whether_email_is_configured(self):
         with patch.dict("os.environ", {"SMTP_HOST": "smtp.test", "SMTP_FROM": "noreply@test"}):
-            self.assertTrue(auth.auth_config()["email_configured"])
+            self.assertTrue(self.read_auth_config()["email_configured"])
 
         with patch.dict("os.environ", {"SMTP_HOST": "", "SMTP_FROM": ""}):
-            self.assertFalse(auth.auth_config()["email_configured"])
+            self.assertFalse(self.read_auth_config()["email_configured"])
 
     def test_auth_config_reports_enabled_identity_providers(self):
         with patch.dict(
@@ -121,7 +135,7 @@ class AuthHelperTests(unittest.TestCase):
                 "LINKEDIN_CLIENT_SECRET": "",
             },
         ):
-            config = auth.auth_config()
+            config = self.read_auth_config()
 
         self.assertTrue(config["google_enabled"])
         self.assertTrue(config["github_enabled"])
@@ -136,7 +150,7 @@ class AuthHelperTests(unittest.TestCase):
                 "TWILIO_VERIFY_SERVICE_SID": "VA-test",
             },
         ):
-            self.assertTrue(auth.auth_config()["sms_enabled"])
+            self.assertTrue(self.read_auth_config()["sms_enabled"])
 
         with patch.dict(
             "os.environ",
@@ -146,7 +160,46 @@ class AuthHelperTests(unittest.TestCase):
                 "TWILIO_VERIFY_SERVICE_SID": "",
             },
         ):
-            self.assertFalse(auth.auth_config()["sms_enabled"])
+            self.assertFalse(self.read_auth_config()["sms_enabled"])
+
+    def test_admin_can_persist_verification_policy_and_non_admin_is_denied(self):
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            test_engine = create_engine(
+                f"sqlite:///{Path(temporary_directory) / 'admin-test.db'}",
+                connect_args={"check_same_thread": False},
+            )
+            Base.metadata.create_all(bind=test_engine)
+            try:
+                with sessionmaker(bind=test_engine)() as db:
+                    admin = User(email="admin@example.com", email_verified=True)
+                    regular_user = User(email="user@example.com", email_verified=True)
+                    db.add_all([admin, regular_user])
+                    db.commit()
+                    with patch.dict(
+                        "os.environ",
+                        {
+                            "ADMIN_EMAILS": "admin@example.com",
+                            "SEND_VERIFICATION_EMAIL": "true",
+                        },
+                    ):
+                        self.assertTrue(
+                            auth.get_admin_settings(db, admin)["verification_email_enabled"]
+                        )
+                        updated = auth.update_admin_settings(
+                            auth.EmailVerificationSetting(enabled=False),
+                            db,
+                            admin,
+                        )
+                        self.assertFalse(updated["verification_email_enabled"])
+                        self.assertFalse(
+                            auth.auth_config(db)["verification_email_enabled"]
+                        )
+                        with self.assertRaises(HTTPException) as error:
+                            auth.get_current_admin(regular_user)
+                        self.assertEqual(error.exception.status_code, 403)
+            finally:
+                Base.metadata.drop_all(bind=test_engine)
+                test_engine.dispose()
 
     def test_phone_login_and_phone_link_use_twilio_verify(self):
         with tempfile.TemporaryDirectory() as temporary_directory:

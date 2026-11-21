@@ -69,7 +69,24 @@ SMTP_USE_SSL=false
 
 > **Keep credentials private.** Store real values in `backend\.env` only—never commit or share them. Restart the backend after changing environment settings.
 
-When verification email is disabled, newly registered accounts are marked verified and can sign in immediately. Existing accounts are not changed. Password-reset emails still require SMTP.
+When verification email is disabled, accounts are marked verified and can sign in immediately without SMTP. When enabled, new registrations require email confirmation.
+
+### Toggle Email Verification
+
+You can command whether email verification is required or disabled project-wide at any time:
+
+1. **Via CLI Command**:
+   ```powershell
+   python toggle_verification.py status           # Check current status
+   python toggle_verification.py off              # Disable verification project-wide
+   python toggle_verification.py off --verify-all  # Disable & verify existing accounts
+   python toggle_verification.py on               # Enable verification project-wide
+   python toggle_verification.py toggle           # Flip current state
+   ```
+2. **Via Web UI**:
+   Go to **Settings → Account & Security → Administrator settings** and toggle **Require email verification project-wide**.
+3. **Via Environment (`backend\.env`)**:
+   Set `SEND_VERIFICATION_EMAIL=false` or `SEND_VERIFICATION_EMAIL=true`.
 
 Local development stores PDFs in `backend\uploads\research_papers\` when Supabase is not configured. To use Supabase Storage locally, set `SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY` in `backend\.env`; set both or leave both blank.
 

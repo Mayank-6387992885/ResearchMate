@@ -6,6 +6,7 @@ export const API_BASE = API_BASE_URL;
 
 export const API = {
   authConfig: `${API_BASE_URL}/auth/config`,
+  adminSettings: `${API_BASE_URL}/auth/admin/settings`,
   currentUser: `${API_BASE_URL}/auth/me`,
   profile: `${API_BASE_URL}/auth/profile`,
   profileImage: `${API_BASE_URL}/auth/profile/image`,

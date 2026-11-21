@@ -593,6 +593,7 @@ function ProfileSelect({
 
 export default function ProfilePage({ user, activePage, onNavigate, onUserUpdated }) {
   const [settings, setSettings] = useState(null);
+  const [adminSettings, setAdminSettings] = useState(null);
   const [selectedSection, setSelectedSectionState] = useState(() => {
     const savedSection = window.sessionStorage.getItem(SETTINGS_SECTION_STORAGE_KEY);
     return SETTINGS_SECTION_IDS.has(savedSection) ? savedSection : null;
@@ -674,10 +675,20 @@ export default function ProfilePage({ user, activePage, onNavigate, onUserUpdate
       .finally(() => {
         if (active) setLoading(false);
       });
+    if (user.is_admin) {
+      apiFetch(API.adminSettings)
+        .then((response) => readResponse(response, "Could not load administrator settings."))
+        .then((data) => {
+          if (active) setAdminSettings(data);
+        })
+        .catch((requestError) => {
+          if (active) setError(requestError.message || "Could not load administrator settings.");
+        });
+    }
     return () => {
       active = false;
     };
-  }, []);
+  }, [user.is_admin]);
 
   function updateProfileField(event) {
     const { name } = event.target;
@@ -829,6 +840,32 @@ export default function ProfilePage({ user, activePage, onNavigate, onUserUpdate
       setNotice(successMessage);
     } catch (requestError) {
       setError(requestError.message || "Could not save your settings.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function saveAdminSettings(enabled) {
+    setError("");
+    setNotice("");
+    setBusy(true);
+    try {
+      const data = await readResponse(
+        await apiFetch(API.adminSettings, {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ enabled }),
+        }),
+        "Could not save administrator settings.",
+      );
+      setAdminSettings(data);
+      setNotice(
+        enabled
+          ? "Email verification is now required project-wide."
+          : "Email verification is now disabled project-wide. Users can sign up and sign in immediately.",
+      );
+    } catch (requestError) {
+      setError(requestError.message || "Could not save administrator settings.");
     } finally {
       setBusy(false);
     }
@@ -1349,6 +1386,33 @@ export default function ProfilePage({ user, activePage, onNavigate, onUserUpdate
                 <p className="profile-provider-note">
                   SMS sign-in needs Twilio Verify credentials in backend/.env and a backend restart.
                 </p>
+              )}
+              {user.is_admin && (
+                <>
+                  <div className="profile-settings-title settings-password-title">
+                    <span className="profile-detail-icon"><ShieldCheck size={18} /></span>
+                    <div>
+                      <h2>Administrator settings</h2>
+                      <p>Command whether email verification is required across the project.</p>
+                    </div>
+                  </div>
+                  <p className="profile-provider-note">
+                    {adminSettings?.verification_email_enabled
+                      ? "Email verification is currently REQUIRED. New registrations and unverified accounts require email confirmation (SMTP required)."
+                      : "Email verification is currently DISABLED. Accounts are verified immediately and can log in without email confirmation."}
+                  </p>
+                  <div className="settings-toggle-list">
+                    <label className="settings-toggle">
+                      <span>Require email verification project-wide</span>
+                      <input
+                        type="checkbox"
+                        checked={adminSettings?.verification_email_enabled === true}
+                        disabled={busy || adminSettings === null}
+                        onChange={(event) => saveAdminSettings(event.target.checked)}
+                      />
+                    </label>
+                  </div>
+                </>
               )}
             </div>
           )}
