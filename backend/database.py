@@ -37,10 +37,19 @@ else:
         connect_args = {"check_same_thread": False}
         print("[Database] Using fallback local SQLite: researchmate.db", flush=True)
 
+engine_kwargs = {"connect_args": connect_args}
+if not DATABASE_URL.startswith("sqlite"):
+    engine_kwargs.update({
+        "pool_size": 10,
+        "max_overflow": 20,
+        "pool_recycle": 1800,
+        "pool_timeout": 15,
+        "pool_pre_ping": True,
+    })
+
 engine = create_engine(
     DATABASE_URL,
-    connect_args=connect_args,
-    pool_pre_ping=True
+    **engine_kwargs,
 )
 
 SessionLocal = sessionmaker(

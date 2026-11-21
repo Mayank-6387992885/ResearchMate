@@ -99,100 +99,62 @@ class PaperUpdate(BaseModel):
 @app.on_event("startup")
 def create_database_tables():
     Base.metadata.create_all(bind=engine)
-    paper_columns = {
-        column["name"] for column in inspect(engine).get_columns("research_papers")
-    }
-    if "category" not in paper_columns:
-        with engine.begin() as connection:
-            connection.execute(
-                text(
-                    "ALTER TABLE research_papers "
-                    "ADD COLUMN category VARCHAR(40) NOT NULL DEFAULT 'Uncategorized'"
-                )
-            )
-    if "classification" not in paper_columns:
-        with engine.begin() as connection:
-            connection.execute(
-                text(
-                    "ALTER TABLE research_papers "
-                    "ADD COLUMN classification JSON NOT NULL DEFAULT '{}'"
-                )
-            )
-    if "updated_at" not in paper_columns:
-        with engine.begin() as connection:
-            connection.execute(
-                text("ALTER TABLE research_papers ADD COLUMN updated_at TIMESTAMP")
-            )
-    if "user_id" not in paper_columns:
-        with engine.begin() as connection:
-            connection.execute(
-                text("ALTER TABLE research_papers ADD COLUMN user_id INTEGER REFERENCES users(id)")
-            )
+    # Only run legacy dynamic column migrations on SQLite where migrations are performed locally
+    if engine.dialect.name == "sqlite":
+        try:
+            inspector = inspect(engine)
+            existing_tables = set(inspector.get_table_names())
 
-    user_columns = {
-        column["name"] for column in inspect(engine).get_columns("users")
-    }
-    if "github_id" not in user_columns:
-        with engine.begin() as connection:
-            connection.execute(text("ALTER TABLE users ADD COLUMN github_id VARCHAR(255)"))
-    if "linkedin_sub" not in user_columns:
-        with engine.begin() as connection:
-            connection.execute(text("ALTER TABLE users ADD COLUMN linkedin_sub VARCHAR(255)"))
-    if "phone_number" not in user_columns:
-        with engine.begin() as connection:
-            connection.execute(text("ALTER TABLE users ADD COLUMN phone_number VARCHAR(16)"))
-    if "phone_verified" not in user_columns:
-        with engine.begin() as connection:
-            connection.execute(
-                text("ALTER TABLE users ADD COLUMN phone_verified BOOLEAN NOT NULL DEFAULT FALSE")
-            )
-    user_profile_columns = {
-        "username": "VARCHAR(30)",
-        "profile_data": "TEXT NOT NULL DEFAULT '{}'",
-        "profile_image": "BYTEA",
-        "profile_image_type": "VARCHAR(32)",
-        "notification_preferences": "TEXT NOT NULL DEFAULT '{}'",
-        "privacy_settings": "TEXT NOT NULL DEFAULT '{}'",
-    }
-    for column_name, column_definition in user_profile_columns.items():
-        if column_name not in user_columns:
-            with engine.begin() as connection:
-                connection.execute(
-                    text(f"ALTER TABLE users ADD COLUMN {column_name} {column_definition}")
-                )
-    with engine.begin() as connection:
-        connection.execute(
-            text("CREATE UNIQUE INDEX IF NOT EXISTS ix_users_github_id ON users (github_id)")
-        )
-        connection.execute(
-            text("CREATE UNIQUE INDEX IF NOT EXISTS ix_users_linkedin_sub ON users (linkedin_sub)")
-        )
-        connection.execute(
-            text("CREATE UNIQUE INDEX IF NOT EXISTS ix_users_phone_number ON users (phone_number)")
-        )
-        connection.execute(
-            text("CREATE UNIQUE INDEX IF NOT EXISTS ix_users_username ON users (username)")
-        )
-    sms_verification_columns = {
-        column["name"] for column in inspect(engine).get_columns("sms_verifications")
-    }
-    if "used_at" not in sms_verification_columns:
-        with engine.begin() as connection:
-            connection.execute(
-                text("ALTER TABLE sms_verifications ADD COLUMN used_at TIMESTAMP")
-            )
+            if "research_papers" in existing_tables:
+                paper_columns = {column["name"] for column in inspector.get_columns("research_papers")}
+                with engine.begin() as connection:
+                    if "category" not in paper_columns:
+                        connection.execute(text("ALTER TABLE research_papers ADD COLUMN category VARCHAR(40) NOT NULL DEFAULT 'Uncategorized'"))
+                    if "classification" not in paper_columns:
+                        connection.execute(text("ALTER TABLE research_papers ADD COLUMN classification JSON NOT NULL DEFAULT '{}'"))
+                    if "updated_at" not in paper_columns:
+                        connection.execute(text("ALTER TABLE research_papers ADD COLUMN updated_at TIMESTAMP"))
+                    if "user_id" not in paper_columns:
+                        connection.execute(text("ALTER TABLE research_papers ADD COLUMN user_id INTEGER REFERENCES users(id)"))
 
-    progress_columns = {
-        column["name"] for column in inspect(engine).get_columns("progress_tasks")
-    }
-    if "started_at" not in progress_columns:
-        with engine.begin() as connection:
-            connection.execute(text("ALTER TABLE progress_tasks ADD COLUMN started_at FLOAT"))
-    if "owner_user_id" not in progress_columns:
-        with engine.begin() as connection:
-            connection.execute(
-                text("ALTER TABLE progress_tasks ADD COLUMN owner_user_id INTEGER")
-            )
+            if "users" in existing_tables:
+                user_columns = {column["name"] for column in inspector.get_columns("users")}
+                with engine.begin() as connection:
+                    if "github_id" not in user_columns:
+                        connection.execute(text("ALTER TABLE users ADD COLUMN github_id VARCHAR(255)"))
+                    if "linkedin_sub" not in user_columns:
+                        connection.execute(text("ALTER TABLE users ADD COLUMN linkedin_sub VARCHAR(255)"))
+                    if "phone_number" not in user_columns:
+                        connection.execute(text("ALTER TABLE users ADD COLUMN phone_number VARCHAR(16)"))
+                    if "phone_verified" not in user_columns:
+                        connection.execute(text("ALTER TABLE users ADD COLUMN phone_verified BOOLEAN NOT NULL DEFAULT FALSE"))
+                    user_profile_columns = {
+                        "username": "VARCHAR(30)",
+                        "profile_data": "TEXT NOT NULL DEFAULT '{}'",
+                        "profile_image": "BYTEA",
+                        "profile_image_type": "VARCHAR(32)",
+                        "notification_preferences": "TEXT NOT NULL DEFAULT '{}'",
+                        "privacy_settings": "TEXT NOT NULL DEFAULT '{}'",
+                    }
+                    for column_name, column_definition in user_profile_columns.items():
+                        if column_name not in user_columns:
+                            connection.execute(text(f"ALTER TABLE users ADD COLUMN {column_name} {column_definition}"))
+
+            if "sms_verifications" in existing_tables:
+                sms_verification_columns = {column["name"] for column in inspector.get_columns("sms_verifications")}
+                if "used_at" not in sms_verification_columns:
+                    with engine.begin() as connection:
+                        connection.execute(text("ALTER TABLE sms_verifications ADD COLUMN used_at TIMESTAMP"))
+
+            if "progress_tasks" in existing_tables:
+                progress_columns = {column["name"] for column in inspector.get_columns("progress_tasks")}
+                with engine.begin() as connection:
+                    if "started_at" not in progress_columns:
+                        connection.execute(text("ALTER TABLE progress_tasks ADD COLUMN started_at FLOAT"))
+                    if "owner_user_id" not in progress_columns:
+                        connection.execute(text("ALTER TABLE progress_tasks ADD COLUMN owner_user_id INTEGER"))
+        except Exception as exc:
+            print(f"[Database] SQLite migration notice: {exc}", flush=True)
 
     with SessionLocal() as db:
         interrupted_tasks = db.query(ProgressTask).filter(
