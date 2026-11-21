@@ -635,7 +635,14 @@ class AuthHelperTests(unittest.TestCase):
                     db.commit()
 
                 with (
-                    patch.dict("os.environ", {"SMTP_HOST": "smtp.test", "SMTP_FROM": "noreply@test"}),
+                    patch.dict(
+                        "os.environ",
+                        {
+                            "SEND_VERIFICATION_EMAIL": "true",
+                            "SMTP_HOST": "smtp.test",
+                            "SMTP_FROM": "noreply@test",
+                        },
+                    ),
                     patch.object(auth, "_send_email") as send_email,
                     TestClient(main.app) as client,
                 ):
@@ -717,6 +724,55 @@ class AuthHelperTests(unittest.TestCase):
                     )
                     self.assertEqual(second_login.status_code, 200)
                     self.assertEqual(client.get("/papers").json()["papers"], [])
+
+                    # Test Bearer token header authentication and admin toggle bidirectional switching
+                    admin_token = remembered_login.json()["token"]
+                    self.assertTrue(bool(admin_token))
+
+                    # Client with NO cookies, only Bearer token header
+                    bearer_client = TestClient(main.app)
+                    bearer_headers = {"Authorization": f"Bearer {admin_token}"}
+
+                    me_resp = bearer_client.get("/auth/me", headers=bearer_headers)
+                    self.assertEqual(me_resp.status_code, 200)
+                    self.assertEqual(me_resp.json()["user"]["email"], "first@example.com")
+
+                    # Toggle email verification OFF
+                    put_off = bearer_client.put(
+                        "/auth/admin/settings",
+                        json={"enabled": False},
+                        headers=bearer_headers,
+                    )
+                    self.assertEqual(put_off.status_code, 200)
+                    self.assertFalse(put_off.json()["verification_email_enabled"])
+
+                    # Verify GET reflects the disabled status
+                    get_off = bearer_client.get("/auth/admin/settings", headers=bearer_headers)
+                    self.assertEqual(get_off.status_code, 200)
+                    self.assertFalse(get_off.json()["verification_email_enabled"])
+
+                    # Toggle email verification back ON
+                    put_on = bearer_client.put(
+                        "/auth/admin/settings",
+                        json={"enabled": True},
+                        headers=bearer_headers,
+                    )
+                    self.assertEqual(put_on.status_code, 200)
+                    self.assertTrue(put_on.json()["verification_email_enabled"])
+
+                    # Verify GET reflects the enabled status
+                    get_on = bearer_client.get("/auth/admin/settings", headers=bearer_headers)
+                    self.assertEqual(get_on.status_code, 200)
+                    self.assertTrue(get_on.json()["verification_email_enabled"])
+
+                    # Toggle back OFF again
+                    put_off2 = bearer_client.put(
+                        "/auth/admin/settings",
+                        json={"enabled": False},
+                        headers=bearer_headers,
+                    )
+                    self.assertEqual(put_off2.status_code, 200)
+                    self.assertFalse(put_off2.json()["verification_email_enabled"])
             finally:
                 main.engine = original_engine
                 main.SessionLocal = original_main_session

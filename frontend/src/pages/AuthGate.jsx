@@ -3,7 +3,7 @@ import {
   ArrowLeft, ArrowRight, BookOpen, Eye, EyeOff, LoaderCircle, LockKeyhole, Mail, Moon, Phone, Sparkles, Sun, UserRound,
 } from "lucide-react";
 
-import { API, apiFetch } from "../services/api";
+import { API, apiFetch, setStoredToken } from "../services/api";
 import TimedFeedback from "../components/TimedFeedback";
 
 const REMEMBERED_EMAIL_KEY = "researchmate.rememberedEmail";
@@ -162,6 +162,9 @@ export default function AuthGate({
             }),
             "Could not verify the sign-in code.",
           );
+          if (data.token) {
+            setStoredToken(data.token, false);
+          }
           onAuthenticated(data.user);
           return;
         }
@@ -173,6 +176,9 @@ export default function AuthGate({
           }),
           "Could not sign in.",
         );
+        if (data.token) {
+          setStoredToken(data.token, rememberMe);
+        }
         if (rememberMe) {
           try {
             window.localStorage.setItem(REMEMBERED_EMAIL_KEY, email);

@@ -567,13 +567,15 @@ def _claim_legacy_papers(db: Session, user_id: int) -> None:
 
 
 def _set_session_cookie(response: Response, raw_token: str, max_age: int | None) -> None:
+    is_secure = os.getenv("AUTH_COOKIE_SECURE", "true").lower() == "true"
+    samesite = "none" if is_secure else "lax"
     response.set_cookie(
         SESSION_COOKIE,
         raw_token,
         max_age=max_age,
         httponly=True,
-        secure=os.getenv("AUTH_COOKIE_SECURE", "").lower() == "true",
-        samesite="lax",
+        secure=is_secure,
+        samesite=samesite,
         path="/",
     )
 
@@ -583,7 +585,7 @@ def _issue_session(
     user: User,
     response: Response,
     remember_me: bool = False,
-) -> None:
+) -> str:
     session_lifetime = (
         timedelta(days=SESSION_DAYS)
         if remember_me
@@ -598,13 +600,29 @@ def _issue_session(
     db.commit()
     max_age = int(session_lifetime.total_seconds()) if remember_me else None
     _set_session_cookie(response, raw_token, max_age)
+    return raw_token
+
+
+def _extract_raw_token(request: Request) -> str | None:
+    raw_token = request.cookies.get(SESSION_COOKIE)
+    if raw_token:
+        return raw_token
+    auth_header = request.headers.get("Authorization", "")
+    if auth_header.startswith("Bearer "):
+        token = auth_header[7:].strip()
+        if token:
+            return token
+    x_token = request.headers.get("X-Session-Token", "").strip()
+    if x_token:
+        return x_token
+    return None
 
 
 def get_current_user(
     request: Request,
     db: Session = Depends(get_db),
 ) -> User:
-    raw_token = request.cookies.get(SESSION_COOKIE)
+    raw_token = _extract_raw_token(request)
     if not raw_token:
         raise HTTPException(status_code=401, detail="Sign in to continue.")
 
@@ -620,8 +638,16 @@ def get_current_user(
     if user is None:
         raise HTTPException(status_code=401, detail="This account is unavailable. Please sign in again.")
 
+    is_admin = _is_admin_user(user, db)
+    if is_admin and not user.email_verified:
+        user.email_verified = True
+        try:
+            db.commit()
+        except Exception:
+            db.rollback()
+
     verification_needed = _get_verification_email_enabled(db)
-    if verification_needed and not user.email_verified:
+    if verification_needed and not user.email_verified and not is_admin:
         raise HTTPException(status_code=401, detail="This account is unavailable. Please sign in again.")
     if not verification_needed and not user.email_verified:
         user.email_verified = True
@@ -641,7 +667,7 @@ def _is_admin_user(user: User, db: Session | None = None) -> bool:
     admins.add("admin@researchmate.com")
     if user.email.strip().lower() in admins:
         return True
-    if db is not None:
+    if db is not None and hasattr(db, "query"):
         first_user = db.query(User.id).order_by(User.id.asc()).first()
         if first_user and first_user[0] == user.id:
             return True
@@ -806,12 +832,11 @@ def update_admin_settings(
 ):
     enabled = _set_verification_email_enabled(db, payload.enabled)
     if payload.verify_existing or not enabled:
-        if payload.verify_existing:
-            db.query(User).filter(User.email_verified.is_(False)).update(
-                {"email_verified": True},
-                synchronize_session=False,
-            )
-            db.commit()
+        db.query(User).filter(User.email_verified.is_(False)).update(
+            {"email_verified": True},
+            synchronize_session=False,
+        )
+        db.commit()
     return {"verification_email_enabled": enabled}
 
 
@@ -889,8 +914,8 @@ def login(
         AuthToken.user_id == user.id,
         AuthToken.purpose == "session",
     ).delete(synchronize_session=False)
-    _issue_session(db, user, response, payload.remember_me)
-    return {"user": user_to_dict(user, db)}
+    session_token = _issue_session(db, user, response, payload.remember_me)
+    return {"user": user_to_dict(user, db), "token": session_token}
 
 
 @router.post("/phone/login/code")
@@ -962,8 +987,8 @@ def verify_phone_login_code(
         AuthToken.user_id == user.id,
         AuthToken.purpose == "session",
     ).delete(synchronize_session=False)
-    _issue_session(db, user, response, remember_me)
-    return {"user": user_to_dict(user, db)}
+    session_token = _issue_session(db, user, response, remember_me)
+    return {"user": user_to_dict(user, db), "token": session_token}
 
 
 @router.post("/phone/link/code")
@@ -1043,14 +1068,16 @@ def logout(
     response: Response,
     db: Session = Depends(get_db),
 ):
-    raw_token = request.cookies.get(SESSION_COOKIE)
+    raw_token = _extract_raw_token(request)
     if raw_token:
         db.query(AuthToken).filter(
             AuthToken.token_hash == _token_digest(raw_token),
             AuthToken.purpose == "session",
         ).delete(synchronize_session=False)
         db.commit()
-    response.delete_cookie(SESSION_COOKIE, path="/", samesite="lax")
+    is_secure = os.getenv("AUTH_COOKIE_SECURE", "true").lower() == "true"
+    samesite = "none" if is_secure else "lax"
+    response.delete_cookie(SESSION_COOKIE, path="/", secure=is_secure, samesite=samesite)
     return {"message": "Signed out."}
 
 
@@ -1203,7 +1230,7 @@ def change_password(
         )
 
     user.password_hash = _hash_password(payload.new_password)
-    current_token = request.cookies.get(SESSION_COOKIE, "")
+    current_token = _extract_raw_token(request) or ""
     db.query(AuthToken).filter(
         AuthToken.user_id == user.id,
         AuthToken.purpose == "session",
@@ -1441,7 +1468,8 @@ def google_callback(
     )
     db.commit()
 
-    redirect = RedirectResponse(FRONTEND_URL, status_code=303)
+    separator = "&" if "?" in FRONTEND_URL else "?"
+    redirect = RedirectResponse(f"{FRONTEND_URL}{separator}auth_token={session_token}", status_code=303)
     redirect.delete_cookie(OAUTH_STATE_COOKIE, path="/", samesite="lax")
     _set_session_cookie(redirect, session_token, SESSION_DAYS * 24 * 60 * 60)
     return redirect
@@ -1552,7 +1580,8 @@ def _complete_provider_login(
     )
     db.commit()
 
-    redirect = RedirectResponse(FRONTEND_URL, status_code=303)
+    separator = "&" if "?" in FRONTEND_URL else "?"
+    redirect = RedirectResponse(f"{FRONTEND_URL}{separator}auth_token={session_token}", status_code=303)
     redirect.delete_cookie(state_cookie_name, path="/", samesite="lax")
     _set_session_cookie(redirect, session_token, SESSION_DAYS * 24 * 60 * 60)
     return redirect

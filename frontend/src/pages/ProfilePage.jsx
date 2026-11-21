@@ -594,6 +594,7 @@ function ProfileSelect({
 export default function ProfilePage({ user, activePage, onNavigate, onUserUpdated }) {
   const [settings, setSettings] = useState(null);
   const [adminSettings, setAdminSettings] = useState(null);
+  const [adminLoading, setAdminLoading] = useState(false);
   const [adminBusy, setAdminBusy] = useState(false);
   const [adminError, setAdminError] = useState("");
   const [adminNotice, setAdminNotice] = useState("");
@@ -678,17 +679,23 @@ export default function ProfilePage({ user, activePage, onNavigate, onUserUpdate
       .finally(() => {
         if (active) setLoading(false);
       });
-    apiFetch(API.adminSettings)
-      .then((response) => {
-        if (!response.ok) return null;
-        return response.json();
-      })
-      .then((data) => {
-        if (active && data && typeof data.verification_email_enabled === "boolean") {
-          setAdminSettings(data);
-        }
-      })
-      .catch(() => {});
+    if (user.is_admin) {
+      setAdminLoading(true);
+      apiFetch(API.adminSettings)
+        .then((response) => {
+          if (!response.ok) return null;
+          return response.json();
+        })
+        .then((data) => {
+          if (active && data && typeof data.verification_email_enabled === "boolean") {
+            setAdminSettings(data);
+          }
+        })
+        .catch(() => {})
+        .finally(() => {
+          if (active) setAdminLoading(false);
+        });
+    }
     return () => {
       active = false;
     };
@@ -850,6 +857,7 @@ export default function ProfilePage({ user, activePage, onNavigate, onUserUpdate
   }
 
   async function saveAdminSettings(enabled) {
+    if (adminBusy) return;
     setAdminError("");
     setAdminNotice("");
     setAdminBusy(true);
@@ -1419,7 +1427,9 @@ export default function ProfilePage({ user, activePage, onNavigate, onUserUpdate
                   )}
 
                   <p className="profile-provider-note">
-                    {adminSettings?.verification_email_enabled
+                    {adminLoading && adminSettings === null
+                      ? "Loading administrator settings..."
+                      : adminSettings?.verification_email_enabled
                       ? "Email verification is currently REQUIRED. New registrations and unverified accounts require email confirmation (SMTP required)."
                       : "Email verification is currently DISABLED. Accounts are verified immediately and can log in without email confirmation."}
                   </p>
@@ -1428,22 +1438,16 @@ export default function ProfilePage({ user, activePage, onNavigate, onUserUpdate
                     <label
                       className="settings-toggle"
                       style={{ cursor: "pointer", userSelect: "none" }}
-                      onClick={(e) => {
-                        if (e.target.tagName !== "INPUT") {
-                          e.preventDefault();
-                          const current = adminSettings?.verification_email_enabled === true;
-                          saveAdminSettings(!current);
-                        }
-                      }}
                     >
                       <span style={{ fontWeight: 500 }}>
                         Require email verification project-wide
                         {adminBusy && <small style={{ marginLeft: "10px", opacity: 0.7 }}>(Saving...)</small>}
+                        {adminLoading && adminSettings === null && <small style={{ marginLeft: "10px", opacity: 0.7 }}>(Loading...)</small>}
                       </span>
                       <input
                         type="checkbox"
                         checked={adminSettings?.verification_email_enabled === true}
-                        disabled={adminBusy}
+                        disabled={adminBusy || (adminLoading && adminSettings === null)}
                         style={{ cursor: "pointer", width: "18px", height: "18px" }}
                         onChange={(event) => saveAdminSettings(event.target.checked)}
                       />

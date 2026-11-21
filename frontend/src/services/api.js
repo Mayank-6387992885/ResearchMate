@@ -39,8 +39,52 @@ export const API = {
   deletePaper: (id) => `${API_BASE_URL}/papers/${id}`,
 };
 
+const TOKEN_STORAGE_KEY = "researchmate.session_token";
+
+export function getStoredToken() {
+  try {
+    return window.localStorage.getItem(TOKEN_STORAGE_KEY)
+      || window.sessionStorage.getItem(TOKEN_STORAGE_KEY)
+      || null;
+  } catch {
+    return null;
+  }
+}
+
+export function setStoredToken(token, remember = true) {
+  try {
+    if (!token) {
+      window.localStorage.removeItem(TOKEN_STORAGE_KEY);
+      window.sessionStorage.removeItem(TOKEN_STORAGE_KEY);
+      return;
+    }
+    if (remember) {
+      window.localStorage.setItem(TOKEN_STORAGE_KEY, token);
+      window.sessionStorage.removeItem(TOKEN_STORAGE_KEY);
+    } else {
+      window.sessionStorage.setItem(TOKEN_STORAGE_KEY, token);
+      window.localStorage.removeItem(TOKEN_STORAGE_KEY);
+    }
+  } catch (error) {
+    console.warn("Could not save session token.", error);
+  }
+}
+
+export function clearStoredToken() {
+  setStoredToken(null);
+}
+
 export function apiFetch(url, options = {}) {
-  return fetch(url, { credentials: "include", ...options });
+  const token = getStoredToken();
+  const headers = { ...(options.headers || {}) };
+  if (token && !headers["Authorization"] && !headers["authorization"]) {
+    headers["Authorization"] = `Bearer ${token}`;
+  }
+  return fetch(url, {
+    credentials: "include",
+    ...options,
+    headers,
+  });
 }
 
 export async function fetchPapers({ search = "", savedOnly = false } = {}) {

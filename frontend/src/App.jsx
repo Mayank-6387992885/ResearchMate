@@ -10,7 +10,7 @@ import MySummaries from "./pages/MySummaries";
 import AuthGate from "./pages/AuthGate";
 import LandingPage from "./pages/LandingPage";
 import ProfilePage from "./pages/ProfilePage";
-import { API, apiFetch } from "./services/api";
+import { API, apiFetch, clearStoredToken, setStoredToken } from "./services/api";
 
 const ACTIVE_PAGE_STORAGE_KEY = "researchmate.activePage";
 const PREVIOUS_WORKSPACE_PAGE_STORAGE_KEY = "researchmate.previousWorkspacePage";
@@ -99,12 +99,28 @@ export default function App() {
   }
 
   useEffect(() => {
+    try {
+      const params = new URLSearchParams(window.location.search);
+      const authToken = params.get("auth_token");
+      if (authToken) {
+        setStoredToken(authToken, true);
+        params.delete("auth_token");
+        const newSearch = params.toString();
+        const newUrl = window.location.pathname + (newSearch ? `?${newSearch}` : "") + window.location.hash;
+        window.history.replaceState({}, "", newUrl);
+      }
+    } catch {}
+  }, []);
+
+  useEffect(() => {
     let active = true;
     apiFetch(API.currentUser)
       .then(async (response) => {
         if (response.ok) {
           const data = await response.json();
           if (active) setUser(data.user);
+        } else if (response.status === 401) {
+          clearStoredToken();
         }
       })
       .catch(() => {
@@ -165,6 +181,7 @@ export default function App() {
           try {
             await apiFetch(API.logout, { method: "POST" });
           } finally {
+            clearStoredToken();
             window.sessionStorage.removeItem("researchmate.activeSummaryTask");
             window.sessionStorage.removeItem("researchmate.progressSamples");
             window.sessionStorage.removeItem(ACTIVE_PAGE_STORAGE_KEY);
