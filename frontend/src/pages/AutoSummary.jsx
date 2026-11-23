@@ -57,6 +57,7 @@ function waitForNextPoll(delay, signal) {
 export default function AutoSummary() {
   const [file, setFile] = useState(null);
   const [progress, setProgress] = useState(0);
+  const [displayProgress, setDisplayProgress] = useState(0);
   const [message, setMessage] = useState("Choose a PDF to begin.");
   const [taskId, setTaskId] = useState(
     () => window.sessionStorage.getItem(ACTIVE_TASK_KEY) || "",
@@ -110,6 +111,61 @@ export default function AutoSummary() {
       active = false;
     };
   }, []);
+
+  useEffect(() => {
+    if (status !== "processing" && status !== "completed") {
+      if (status === "idle") {
+        setDisplayProgress(0);
+      }
+      return;
+    }
+
+    let animationFrameId;
+    let lastTime = performance.now();
+
+    const tick = (now) => {
+      const dt = Math.min((now - lastTime) / 1000, 0.1);
+      lastTime = now;
+
+      setDisplayProgress((current) => {
+        if (status === "completed") {
+          if (current >= 100) return 100;
+          const step = Math.max(0.6, (100 - current) * 6 * dt);
+          return Math.min(100, current + step);
+        }
+
+        const target = progress;
+
+        // On initial task load / reconnect, quickly snap to target
+        if (current === 0 && target > 0) {
+          return target;
+        }
+
+        if (current < target) {
+          // Smoothly glide towards the confirmed backend target
+          const diff = target - current;
+          const speed = Math.max(0.6, diff * 1.5);
+          const step = speed * dt;
+          return Math.min(target, current + step);
+        }
+
+        // When current >= target and analysis is still actively running:
+        // Slowly and gradually trickle forward so progress moves continuously instead of jumping in instant parts
+        const maxTrickle = Math.min(target + (target < 90 ? 3.5 : 0.8), 99.2);
+        if (current < maxTrickle) {
+          const trickleSpeed = 0.08; // ~0.08% per second gradual advancement
+          return Math.min(maxTrickle, current + trickleSpeed * dt);
+        }
+
+        return current;
+      });
+
+      animationFrameId = requestAnimationFrame(tick);
+    };
+
+    animationFrameId = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(animationFrameId);
+  }, [status, progress]);
 
   useEffect(() => {
     const clock = window.setInterval(() => setClockNow(Date.now()), 1000);
@@ -268,6 +324,7 @@ export default function AutoSummary() {
     setTaskId(currentTaskId);
     setStatus("processing");
     setProgress(0);
+    setDisplayProgress(0);
     setMessage("Connecting to ResearchMate...");
     setResult(null);
     setPartialResult(null);
@@ -477,6 +534,7 @@ export default function AutoSummary() {
             setError("");
             setStatus("idle");
             setProgress(0);
+            setDisplayProgress(0);
             setMessage("Ready to upload.");
             setProgressSyncIssue("");
             setLastSyncedAt(null);
@@ -507,7 +565,7 @@ export default function AutoSummary() {
 
           <div className="progress-overview">
             <div className="progress-reading">
-              <strong className="progress-number">{progress}%</strong>
+              <strong className="progress-number">{displayProgress.toFixed(2)}%</strong>
               <span className="progress-eta">
                 {status === "completed"
                   ? "Complete"
@@ -520,8 +578,8 @@ export default function AutoSummary() {
             </div>
           </div>
 
-          <div className="progress-track" role="progressbar" aria-valuenow={progress} aria-valuemin="0" aria-valuemax="100">
-            <div className="progress-fill" style={{ width: `${progress}%` }} />
+          <div className="progress-track" role="progressbar" aria-valuenow={Number(displayProgress.toFixed(2))} aria-valuemin="0" aria-valuemax="100">
+            <div className="progress-fill" style={{ width: `${Math.min(100, Math.max(0, displayProgress)).toFixed(2)}%` }} />
           </div>
 
           <p className="progress-estimate-note">
