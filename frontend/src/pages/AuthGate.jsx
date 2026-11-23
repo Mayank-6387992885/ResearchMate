@@ -319,6 +319,49 @@ export default function AuthGate({
               : "We’ll send a secure link to the email address on your account."}
         </p>
 
+        <div style={{
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "space-between",
+          background: isLocalApi() ? "rgba(16, 185, 129, 0.08)" : "rgba(99, 102, 241, 0.08)",
+          border: `1px solid ${isLocalApi() ? "rgba(16, 185, 129, 0.3)" : "rgba(99, 102, 241, 0.3)"}`,
+          borderRadius: "8px",
+          padding: "6px 12px",
+          marginBottom: "16px",
+          fontSize: "12px",
+        }}>
+          <span style={{ display: "flex", alignItems: "center", gap: "6px", color: "var(--text-primary)" }}>
+            <span style={{
+              width: "7px",
+              height: "7px",
+              borderRadius: "50%",
+              background: isLocalApi() ? "#10b981" : "#6366f1",
+              display: "inline-block"
+            }} />
+            Backend: <strong>{isLocalApi() ? "Local (:8000)" : "Cloud (Render)"}</strong>
+          </span>
+          <button
+            type="button"
+            style={{
+              background: "none",
+              border: "none",
+              color: isLocalApi() ? "#059669" : "#4f46e5",
+              fontWeight: 600,
+              cursor: "pointer",
+              padding: "2px 4px",
+              fontSize: "12px",
+              textDecoration: "underline"
+            }}
+            onClick={() => {
+              const next = isLocalApi() ? "render" : "local";
+              setApiTarget(next);
+              window.location.reload();
+            }}
+          >
+            {isLocalApi() ? "Switch to Cloud" : "Switch to Local"}
+          </button>
+        </div>
+
         <form id="researchmate-login-form" className="auth-form" autoComplete="on" onSubmit={submit}>
           {!isReset && !(isPhoneLogin && smsChallengeId) && (
             <label>
@@ -458,9 +501,32 @@ export default function AuthGate({
             </p>
           )}
           {error && (
-            <TimedFeedback as="p" className="auth-message error-message" role="alert" message={error}>
-              {error}
-            </TimedFeedback>
+            <div className="auth-message error-message" role="alert" style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
+              <span>{error}</span>
+              {isLocalApi() && (error.includes("Cannot connect") || error.includes("Failed to fetch") || error.includes("local server") || error.includes("backend")) && (
+                <button
+                  type="button"
+                  style={{
+                    alignSelf: "flex-start",
+                    background: "#4f46e5",
+                    color: "#ffffff",
+                    border: "none",
+                    borderRadius: "6px",
+                    padding: "6px 12px",
+                    fontSize: "12px",
+                    fontWeight: 600,
+                    cursor: "pointer",
+                    boxShadow: "0 1px 3px rgba(0,0,0,0.15)",
+                  }}
+                  onClick={() => {
+                    setApiTarget("render");
+                    window.location.reload();
+                  }}
+                >
+                  Switch to Cloud Backend (Render)
+                </button>
+              )}
+            </div>
           )}
           {notice && (
             <TimedFeedback as="p" className="auth-message auth-notice" role="status" message={notice}>

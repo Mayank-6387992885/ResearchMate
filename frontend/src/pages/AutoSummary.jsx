@@ -10,7 +10,7 @@ import FileUpload from "../components/FileUpload";
 import SummaryCard from "../components/SummaryCard";
 import ResearchChart from "../components/ResearchChart";
 import TimedFeedback from "../components/TimedFeedback";
-import { API, apiFetch } from "../services/api";
+import { API, apiFetch, isLocalApi, setApiTarget } from "../services/api";
 import { formatSummaryText } from "../utils/formatSummary";
 
 const ACTIVE_TASK_KEY = "researchmate.activeSummaryTask";
@@ -485,10 +485,46 @@ export default function AutoSummary() {
       )}
 
       {error && (
-        <TimedFeedback className="error-message" role="alert" message={error}>
-          <AlertCircle size={18} />
-          {error}
-        </TimedFeedback>
+        <div className="error-message" role="alert" style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
+          <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+            <AlertCircle size={18} />
+            <span>{error}</span>
+          </div>
+          {!isLocalApi() && (error.toLowerCase().includes("ollama") || error.toLowerCase().includes("11434")) && (
+            <div style={{
+              marginTop: "4px",
+              padding: "10px 12px",
+              background: "rgba(79, 70, 229, 0.08)",
+              border: "1px solid rgba(79, 70, 229, 0.2)",
+              borderRadius: "6px",
+              fontSize: "13px",
+              color: "var(--text-primary)"
+            }}>
+              <p style={{ margin: "0 0 8px 0" }}>
+                💡 <strong>Why this happens:</strong> You are using the <strong>Cloud (Render)</strong> backend, but Ollama is running on your <strong>local computer</strong>. Remote cloud servers cannot connect to your personal PC's localhost.
+              </p>
+              <button
+                type="button"
+                style={{
+                  background: "#4f46e5",
+                  color: "#ffffff",
+                  border: "none",
+                  borderRadius: "6px",
+                  padding: "6px 14px",
+                  fontSize: "12px",
+                  fontWeight: 600,
+                  cursor: "pointer",
+                }}
+                onClick={() => {
+                  setApiTarget("local");
+                  window.location.reload();
+                }}
+              >
+                Switch to Local Backend (port 8000)
+              </button>
+            </div>
+          )}
+        </div>
       )}
 
       {result && (

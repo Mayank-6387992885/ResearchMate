@@ -1,6 +1,7 @@
 """ResearchMate API: PDF summarization, progress updates, and paper library."""
 import ctypes
 import os
+import threading
 import time
 import uuid
 from ctypes import wintypes
@@ -98,9 +99,9 @@ class PaperUpdate(BaseModel):
 
 @app.on_event("startup")
 def create_database_tables():
-    Base.metadata.create_all(bind=engine)
-    # Only run legacy dynamic column migrations on SQLite where migrations are performed locally
+    # Only create/migrate tables on startup for local SQLite; remote PostgreSQL is pre-provisioned
     if engine.dialect.name == "sqlite":
+        Base.metadata.create_all(bind=engine)
         try:
             inspector = inspect(engine)
             existing_tables = set(inspector.get_table_names())
@@ -156,20 +157,28 @@ def create_database_tables():
         except Exception as exc:
             print(f"[Database] SQLite migration notice: {exc}", flush=True)
 
-    with SessionLocal() as db:
-        interrupted_tasks = db.query(ProgressTask).filter(
-            ProgressTask.status == "processing",
-        ).all()
-        for task in interrupted_tasks:
-            if not _process_is_running(getattr(task, "owner_pid", None)):
-                setattr(task, "status", "error")
-                setattr(
-                    task,
-                    "message",
-                    "Backend stopped before this analysis completed.",
-                )
-                setattr(task, "updated_at", time.time())
-        db.commit()
+    # Reconcile interrupted tasks and pre-warm DB connection pool in the background so API startup is instantaneous
+    def _background_init():
+        try:
+            with SessionLocal() as db:
+                interrupted_tasks = db.query(ProgressTask).filter(
+                    ProgressTask.status == "processing",
+                ).all()
+                for task in interrupted_tasks:
+                    if not _process_is_running(getattr(task, "owner_pid", None)):
+                        setattr(task, "status", "error")
+                        setattr(
+                            task,
+                            "message",
+                            "Backend stopped before this analysis completed.",
+                        )
+                        setattr(task, "updated_at", time.time())
+                db.commit()
+                print("[Startup] Database connection warmed and tasks reconciled.", flush=True)
+        except Exception as exc:
+            print(f"[Startup] Background init notice: {exc}", flush=True)
+
+    threading.Thread(target=_background_init, daemon=True).start()
 
 
 def _process_is_running(process_id: int | None) -> bool:

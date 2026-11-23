@@ -29,7 +29,14 @@ else:
             connect_args = {"check_same_thread": False}
             print("[Database] Using SQLite from DATABASE_URL", flush=True)
         else:
-            connect_args = {"sslmode": "require"} if ("localhost" not in DATABASE_URL and "127.0.0.1" not in DATABASE_URL and "sslmode=" not in DATABASE_URL) else {}
+            connect_args = {
+                "sslmode": "require",
+                "connect_timeout": 10,
+                "keepalives": 1,
+                "keepalives_idle": 30,
+                "keepalives_interval": 10,
+                "keepalives_count": 5,
+            } if ("localhost" not in DATABASE_URL and "127.0.0.1" not in DATABASE_URL and "sslmode=" not in DATABASE_URL) else {}
             host = DATABASE_URL.split("@")[-1].split("/")[0] if "@" in DATABASE_URL else "PostgreSQL"
             print(f"[Database] Using Supabase PostgreSQL: {host}", flush=True)
     else:

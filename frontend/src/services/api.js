@@ -103,17 +103,35 @@ export function clearStoredToken() {
   setStoredToken(null);
 }
 
-export function apiFetch(url, options = {}) {
+export async function apiFetch(url, options = {}) {
   const token = getStoredToken();
   const headers = { ...(options.headers || {}) };
   if (token && !headers["Authorization"] && !headers["authorization"]) {
     headers["Authorization"] = `Bearer ${token}`;
   }
-  return fetch(url, {
-    credentials: "include",
-    ...options,
-    headers,
-  });
+  try {
+    return await fetch(url, {
+      credentials: "include",
+      ...options,
+      headers,
+    });
+  } catch (err) {
+    if (
+      err instanceof TypeError &&
+      (err.message === "Failed to fetch" || err.message?.includes("NetworkError") || err.message?.includes("Failed to fetch"))
+    ) {
+      const isLocal = isLocalApi();
+      const target = getApiBaseUrl();
+      const msg = isLocal
+        ? `Cannot connect to local server at ${target}. Make sure backend is running or switch to Cloud.`
+        : `Cannot connect to Cloud server at ${target}. Please check your network connection.`;
+      const enriched = new Error(msg);
+      enriched.isConnectionError = true;
+      enriched.target = target;
+      throw enriched;
+    }
+    throw err;
+  }
 }
 
 export async function fetchPapers({ search = "", savedOnly = false } = {}) {

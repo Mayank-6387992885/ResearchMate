@@ -320,6 +320,16 @@ Write one clear, well-organized final summary.
         return final_summary
 
     except requests.exceptions.ConnectionError as exc:
+        is_cloud = bool(
+            os.getenv("RENDER")
+            or os.getenv("RENDER_SERVICE_ID")
+            or "render" in os.getenv("FRONTEND_URL", "").lower()
+        )
+        if is_cloud:
+            raise RuntimeError(
+                "Cannot connect to Ollama from Cloud (Render). Ollama runs on your local computer at localhost:11434, "
+                "which cannot be reached from the cloud. Please switch your frontend to 'Use Local' and run the local backend."
+            ) from exc
         raise RuntimeError(
             "Cannot connect to Ollama. Ensure Ollama is running at localhost:11434."
         ) from exc
