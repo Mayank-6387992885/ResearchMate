@@ -68,7 +68,7 @@ def create_paper(
     summary: str,
     pages: int,
     user_id: int,
-    classification: dict[str, list[str]] | None = None,
+    classification: dict[str, Any] | None = None,
 ) -> ResearchPaper:
     filename = _safe_filename(original_filename)
     title = Path(filename).stem[:255] or "Untitled Research Paper"
@@ -157,7 +157,9 @@ def toggle_saved(db: Session, paper_id: int, user_id: int) -> ResearchPaper:
 
 def update_paper(db: Session, paper_id: int, user_id: int,
                  title: str | None = None, category: str | None = None,
-                 classification: dict[str, list[str]] | None = None) -> ResearchPaper:
+                 classification: dict[str, Any] | None = None,
+                 figures: list[dict[str, Any]] | None = None,
+                 chart_data: list[dict[str, Any]] | None = None) -> ResearchPaper:
     paper = get_paper_or_404(db, paper_id, user_id)
     if title is not None:
         title = title.strip()
@@ -170,11 +172,33 @@ def update_paper(db: Session, paper_id: int, user_id: int,
         if category not in PAPER_CATEGORIES:
             raise HTTPException(status_code=422, detail="Choose a valid paper category.")
         paper.category = category
+
+    current_meta = dict(paper.classification or {})
+    if figures is not None:
+        current_meta["figures"] = figures
+    if chart_data is not None:
+        current_meta["chart_data"] = chart_data
+
     if classification is not None:
         try:
-            paper.classification = validate_classification(classification)
+            passed_figs = classification.pop("figures", None) if isinstance(classification, dict) else None
+            passed_charts = classification.pop("chart_data", None) if isinstance(classification, dict) else None
+            if passed_figs is not None:
+                current_meta["figures"] = passed_figs
+            if passed_charts is not None:
+                current_meta["chart_data"] = passed_charts
+
+            validated = validate_classification(classification)
+            if "figures" in current_meta:
+                validated["figures"] = current_meta["figures"]
+            if "chart_data" in current_meta:
+                validated["chart_data"] = current_meta["chart_data"]
+            paper.classification = validated
         except ValueError as exc:
             raise HTTPException(status_code=422, detail=str(exc)) from exc
+    elif figures is not None or chart_data is not None:
+        paper.classification = current_meta
+
     db.commit()
     db.refresh(paper)
     return paper

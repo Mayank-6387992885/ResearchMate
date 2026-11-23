@@ -27,7 +27,13 @@ from models.research_paper import ResearchPaper  # Ensure model is registered wi
 from models.sms_verification import SmsVerification  # Ensure model is registered with SQLAlchemy.
 from models.user import User
 import services.paper_service as paper_service
-from summarizer import get_last_fallback_notice, set_last_fallback_notice, summarize_paper
+from figures import extract_paper_figures
+from summarizer import (
+    extract_research_metrics,
+    get_last_fallback_notice,
+    set_last_fallback_notice,
+    summarize_paper,
+)
 
 app = FastAPI(title="ResearchMate API")
 
@@ -278,6 +284,13 @@ def get_progress_state(task_id: str, user_id: int) -> dict[str, Any] | None:
 
 
 def paper_to_dict(paper: ResearchPaper) -> dict:
+    raw_classification = dict(paper.classification or {})
+    figures = raw_classification.get("figures", [])
+    chart_data = raw_classification.get("chart_data", [])
+    clean_classification = {
+        k: v for k, v in raw_classification.items()
+        if k not in ("figures", "chart_data")
+    }
     return {
         "id": paper.id,
         "title": paper.title,
@@ -286,7 +299,9 @@ def paper_to_dict(paper: ResearchPaper) -> dict:
         "summary": paper.summary,
         "is_saved": paper.is_saved,
         "category": paper.category,
-        "classification": paper.classification or {},
+        "classification": clean_classification,
+        "figures": figures,
+        "chart_data": chart_data,
         "uploaded_at": paper.uploaded_at.isoformat() if paper.uploaded_at is not None else None,
         "updated_at": paper.updated_at.isoformat() if paper.updated_at is not None else None,
     }
@@ -368,6 +383,9 @@ async def upload_paper(
                 detail="No selectable text found in the PDF. OCR may be required for scanned documents.",
             )
 
+        report_progress(12, "Extracting figures, plots, and architecture diagrams...")
+        figures = await run_in_threadpool(extract_paper_figures, content, 8)
+
         report_progress(15, "Text extracted. Preparing AI summarization...")
 
         set_last_fallback_notice(None)
@@ -380,6 +398,19 @@ async def upload_paper(
             x_ai_model,
         )
 
+        report_progress(93, "Extracting numerical statistics and benchmark metrics...")
+        chart_data = await run_in_threadpool(
+            extract_research_metrics,
+            text,
+            summary,
+            x_ai_provider,
+            x_ai_model,
+        )
+
+        initial_meta = {
+            "figures": figures,
+            "chart_data": chart_data,
+        }
         paper = getattr(paper_service, "create_paper")(
             db=db,
             pdf_content=content,
@@ -387,6 +418,7 @@ async def upload_paper(
             summary=summary,
             pages=page_count,
             user_id=user.id,
+            classification=initial_meta,
         )
 
         classification_error = None
@@ -425,7 +457,12 @@ async def upload_paper(
             print(f"[WARNING] Paper saved without AI classification: {exc}", flush=True)
         else:
             paper = getattr(paper_service, "update_paper")(
-                db, paper.id, user_id=user.id, classification=classification
+                db,
+                paper.id,
+                user_id=user.id,
+                classification=classification,
+                figures=figures,
+                chart_data=chart_data,
             )
 
         total_time = time.time() - start_time

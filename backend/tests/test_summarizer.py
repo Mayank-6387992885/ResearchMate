@@ -161,6 +161,26 @@ class SummarizerTests(unittest.TestCase):
             self.assertEqual(result, "Groq summary.")
             self.assertIn("api.groq.com", post_mock.call_args.args[0])
 
+    def test_extract_research_metrics_json_success(self):
+        sample_json = json.dumps([
+            {"label": "BLEU Score", "value": 28.4},
+            {"label": "Accuracy (%)", "value": 94.6},
+            {"label": "Speedup", "value": 3.5},
+        ])
+        with patch.object(summarizer, "stream_ollama", return_value=sample_json):
+            metrics = summarizer.extract_research_metrics("paper content", "summary")
+            self.assertEqual(len(metrics), 3)
+            self.assertEqual(metrics[0]["label"], "BLEU Score")
+            self.assertEqual(metrics[0]["value"], 28.4)
+
+    def test_extract_research_metrics_regex_fallback(self):
+        text = "The model achieved 94.2% accuracy and 3.5x speedup compared to prior baselines."
+        with patch.object(summarizer, "stream_ollama", side_effect=RuntimeError("AI failed")):
+            metrics = summarizer.extract_research_metrics(text, text)
+            self.assertTrue(len(metrics) >= 1)
+            values = [m["value"] for m in metrics]
+            self.assertTrue(any(v in (94.2, 3.5) for v in values))
+
 
 if __name__ == "__main__":
     unittest.main()

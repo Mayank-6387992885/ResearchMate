@@ -9,6 +9,7 @@ import {
 import FileUpload from "../components/FileUpload";
 import SummaryCard from "../components/SummaryCard";
 import ResearchChart from "../components/ResearchChart";
+import PaperFigures from "../components/PaperFigures";
 import TimedFeedback from "../components/TimedFeedback";
 import { API, apiFetch, isLocalApi, setApiTarget } from "../services/api";
 import { formatSummaryText } from "../utils/formatSummary";
@@ -1215,6 +1216,7 @@ export default function AutoSummary() {
           )}
           <SummaryCard summary={result.summary} filename={result.filename} />
           <ResearchChart data={result.chart_data || []} />
+          <PaperFigures figures={result.figures || []} />
         </>
       )}
     </div>

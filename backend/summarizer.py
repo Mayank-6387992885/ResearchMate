@@ -3,6 +3,7 @@
 import hashlib
 import json
 import os
+import re
 import tempfile
 import threading
 import time
@@ -881,19 +882,20 @@ PAPER SECTION:
 
         final_prompt = f"""You are ResearchMate, an AI research paper assistant.
 
-Explain this research paper to a beginner using simple English.
-Use these sections:
+Explain this research paper clearly and thoroughly using simple English.
+Structure the summary with these exact numbered sections:
 1. Paper Overview
 2. Problem Being Solved
-3. Methodology
-4. Key Findings
-5. Limitations
-6. Important Technical Terms
-7. Final Takeaway
+3. Methodology & Architecture
+4. Key Findings & Quantitative Results (include exact benchmark metrics, percentages, BLEU/accuracy scores, speedups, and statistics from the paper)
+5. Statistical & Numerical Highlights (bullet points of all key numbers, dataset sizes, hardware/training metrics, and comparisons)
+6. Limitations & Open Challenges
+7. Important Technical Terms (explained in plain English)
+8. Final Takeaway
 
 Use clear headings and bullet points. Explain technical terms in plain English.
-Do not invent facts, statistics, or findings. If information is missing, state
-that clearly. Combine repeated information.
+Whenever available in the paper, ALWAYS include specific quantitative metrics, numbers, percentages, benchmark comparisons, and statistical findings.
+Do not invent facts, statistics, or findings. If information is missing, state that clearly. Combine repeated information.
 
 SECTION SUMMARIES:
 {combined_text}
@@ -902,7 +904,7 @@ Write one clear, well-organized final summary.
 """
         final_summary = stream_ollama(
             final_prompt,
-            max_tokens=700,
+            max_tokens=950,
             json_format=False,
             heartbeat_callback=report_final_heartbeat,
             provider=provider,
@@ -961,3 +963,127 @@ Write one clear, well-organized final summary.
         active = get_active_provider(provider)
         ai_name = "Gemini" if active == "gemini" else "Grok" if active == "grok" else "Groq" if active == "groq" else "Ollama"
         raise RuntimeError(f"{ai_name} request failed: {exc}") from exc
+
+
+def extract_research_metrics(
+    paper_text: str,
+    summary: str = "",
+    provider: str | None = None,
+    model: str | None = None,
+) -> list[dict[str, Any]]:
+    """Extract key benchmark metrics, scores, percentages, and numerical comparisons
+    from the paper and summary to feed into the interactive research chart.
+
+    Returns a list of dicts: [{"label": str, "value": float}, ...]
+    """
+    if not paper_text and not summary:
+        return []
+
+    context_source = summary if summary.strip() else paper_text[:4000]
+    prompt = f"""You are an expert research data analyst.
+Extract 3 to 6 key quantitative metrics, benchmark scores, percentages, parameters, or dataset statistics mentioned in this research paper.
+
+Each item MUST have:
+- "label": Short, descriptive name (max 25 characters, e.g. "BLEU Score (EN-DE)", "Top-1 Accuracy (%)", "Speedup Factor", "Parameters (M)", "Training Cost ($k)")
+- "value": A numeric float or int (do not include '%' or 'x' in value; put units in label)
+
+Return ONLY a valid JSON array of objects. Do not add any markdown explanation or text outside the JSON array.
+Example format:
+[
+  {{"label": "BLEU Score", "value": 28.4}},
+  {{"label": "Accuracy (%)", "value": 94.6}},
+  {{"label": "Speedup (x)", "value": 3.5}}
+]
+
+PAPER TEXT & SUMMARY:
+{context_source[:3500]}
+"""
+
+    def _fallback_regex_extract() -> list[dict[str, Any]]:
+        metrics: list[dict[str, Any]] = []
+        seen_labels: set[str] = set()
+        text_to_search = f"{summary}\n{paper_text[:6000]}"
+        patterns = [
+            r'([A-Za-z0-9\-\s]{3,24})\s*(?:of|is|reached|achieved|=|:)\s*(\d+(?:\.\d+)?)\s*%',
+            r'([A-Za-z0-9\-\s]{3,24})\s*(?:score|metric)?\s*[:=]\s*(\d+(?:\.\d+)?)',
+            r'(\d+(?:\.\d+)?)\s*%\s*(?:accuracy|improvement|reduction|increase|efficiency)',
+            r'(\d+(?:\.\d+)?)\s*x\s*(?:speedup|faster|throughput)',
+        ]
+        for pat in patterns:
+            for match in re.finditer(pat, text_to_search, re.IGNORECASE):
+                try:
+                    groups = match.groups()
+                    if len(groups) == 2:
+                        raw_label, raw_val = groups[0].strip(), float(groups[1])
+                    else:
+                        raw_label = match.group(0).strip()
+                        raw_val = float(groups[0])
+                    clean_label = re.sub(r'[\r\n\t]+', ' ', raw_label).strip()
+                    clean_label = re.sub(r'^(the|a|an)\s+', '', clean_label, flags=re.IGNORECASE)
+                    if len(clean_label) > 28:
+                        clean_label = clean_label[:25] + "..."
+                    if clean_label.lower() not in seen_labels and 0 < len(clean_label) <= 28:
+                        seen_labels.add(clean_label.lower())
+                        metrics.append({"label": clean_label, "value": raw_val})
+                        if len(metrics) >= 6:
+                            return metrics
+                except Exception:
+                    continue
+        return metrics
+
+    try:
+        raw_output = stream_ollama(
+            prompt,
+            max_tokens=350,
+            json_format=True,
+            provider=provider,
+            model=model,
+        )
+        if not raw_output or not raw_output.strip():
+            return _fallback_regex_extract()
+
+        clean_json = raw_output.strip()
+        if "```" in clean_json:
+            clean_json = re.sub(r"^```(?:json)?\s*", "", clean_json, flags=re.MULTILINE)
+            clean_json = re.sub(r"\s*```$", "", clean_json, flags=re.MULTILINE).strip()
+
+        start = clean_json.find("[")
+        end = clean_json.rfind("]")
+        if start != -1 and end != -1:
+            clean_json = clean_json[start : end + 1]
+
+        data = json.loads(clean_json)
+        if not isinstance(data, list) and isinstance(data, dict):
+            for v in data.values():
+                if isinstance(v, list):
+                    data = v
+                    break
+        if isinstance(data, list):
+            valid_metrics: list[dict[str, Any]] = []
+            for item in data:
+                if not isinstance(item, dict):
+                    continue
+                label = str(item.get("label", item.get("name", ""))).strip()
+                val = item.get("value", item.get("val", item.get("score")))
+                if not label or val is None:
+                    continue
+                try:
+                    num_val = float(val)
+                except (ValueError, TypeError):
+                    m = re.search(r"\d+(?:\.\d+)?", str(val))
+                    if m:
+                        num_val = float(m.group(0))
+                    else:
+                        continue
+                if len(label) > 30:
+                    label = label[:27] + "..."
+                valid_metrics.append({"label": label, "value": round(num_val, 2)})
+                if len(valid_metrics) >= 7:
+                    break
+            if valid_metrics:
+                return valid_metrics
+    except Exception as exc:
+        print(f"[AI] Note: could not extract research metrics via AI ({exc}); trying fallback.", flush=True)
+
+    return _fallback_regex_extract()
+
