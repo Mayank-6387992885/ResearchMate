@@ -202,8 +202,21 @@ export default function AutoSummary() {
     if (isSwitchingModelRef.current) return;
     isSwitchingModelRef.current = true;
 
-    const currentKey = failedModelKey || activeModelKeyRef.current;
+    // Detect actual failed provider from error text if possible
+    let currentKey = failedModelKey || activeModelKeyRef.current;
+    const lowerErr = (rawErrorMessage || "").toLowerCase();
+    if (lowerErr.includes("grok") || lowerErr.includes("x.ai") || lowerErr.includes("xai")) {
+      currentKey = "grok:grok-2-latest";
+    } else if (lowerErr.includes("gemini") || lowerErr.includes("google")) {
+      currentKey = "gemini:gemini-2.5-flash";
+    } else if (lowerErr.includes("groq")) {
+      currentKey = "groq:llama-3.3-70b-versatile";
+    } else if (lowerErr.includes("ollama") || lowerErr.includes("11434")) {
+      currentKey = "ollama:default";
+    }
+
     triedModelsRef.current.add(currentKey);
+    triedModelsRef.current.add(activeModelKeyRef.current);
 
     const nextModelKey = pickNextFallbackModel(currentKey, triedModelsRef.current);
 
@@ -240,14 +253,38 @@ export default function AutoSummary() {
     uploadControllerRef.current = null;
     progressControllerRef.current = null;
 
-    // Continue summarizing process without stopping!
+    // Continue summarizing process without stopping if we have the file!
     window.setTimeout(() => {
       isSwitchingModelRef.current = false;
       const targetFile = currentFileRef.current;
       if (targetFile) {
         void handleUpload(nextModelKey, targetFile);
+      } else {
+        // If we reconnected to a past task from sessionStorage without the raw PDF File object,
+        // exit processing state cleanly so the user isn't stuck.
+        window.sessionStorage.removeItem(ACTIVE_TASK_KEY);
+        setTaskId("");
+        setStatus("idle");
+        setMessage(`Analysis interrupted. Switched to ${nextLabel.split("(")[0].trim()}. Choose your PDF to summarize.`);
       }
     }, 450);
+  };
+
+  const handleResetStalledTask = () => {
+    uploadControllerRef.current?.abort();
+    progressControllerRef.current?.abort();
+    uploadControllerRef.current = null;
+    progressControllerRef.current = null;
+    window.sessionStorage.removeItem(ACTIVE_TASK_KEY);
+    window.sessionStorage.removeItem(PROGRESS_SAMPLES_KEY);
+    setTaskId("");
+    setStatus("idle");
+    setProgress(0);
+    setDisplayProgress(0);
+    setMessage("Ready to upload a research paper.");
+    setAutoSwitchNotice(null);
+    setError("");
+    setProgressSyncIssue("");
   };
   const uploadControllerRef = useRef(null);
   const progressControllerRef = useRef(null);
@@ -430,6 +467,18 @@ export default function AutoSummary() {
               PROGRESS_SAMPLES_KEY,
               JSON.stringify(progressSamplesRef.current),
             );
+          }
+        }
+
+        if (Number.isFinite(update.updated_at)) {
+          const taskAgeSeconds = Date.now() / 1000 - update.updated_at;
+          if (taskAgeSeconds > 300 && update.status === "processing" && !currentFileRef.current) {
+            window.sessionStorage.removeItem(ACTIVE_TASK_KEY);
+            setTaskId("");
+            setStatus("idle");
+            setMessage("Previous background analysis timed out. Select a PDF to start fresh.");
+            uploadControllerRef.current?.abort();
+            return update;
           }
         }
 
@@ -811,9 +860,30 @@ export default function AutoSummary() {
               <p className="eyebrow">LIVE PROCESS · {taskId.slice(0, 8)}</p>
               <h2>AI Paper Analysis</h2>
             </div>
-            <span className={`progress-status-badge ${isProcessing ? "processing" : "completed"}`}>
-              {isProcessing ? "Processing" : "Complete"}
-            </span>
+            <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+              {isProcessing && (
+                <button
+                  type="button"
+                  onClick={handleResetStalledTask}
+                  title="Cancel and reset this analysis"
+                  style={{
+                    padding: "4px 10px",
+                    borderRadius: "6px",
+                    fontSize: "11px",
+                    fontWeight: 600,
+                    border: "1px solid rgba(0, 0, 0, 0.15)",
+                    background: "transparent",
+                    color: "var(--text-secondary, #64748b)",
+                    cursor: "pointer",
+                  }}
+                >
+                  ✕ Cancel
+                </button>
+              )}
+              <span className={`progress-status-badge ${isProcessing ? "processing" : "completed"}`}>
+                {isProcessing ? "Processing" : "Complete"}
+              </span>
+            </div>
           </div>
 
           <div className="progress-overview">
@@ -868,15 +938,38 @@ export default function AutoSummary() {
             )}
           </p>
           {progressIsStalled && (
-            <div className="progress-stall-warning" role="status">
-              <AlertCircle size={18} />
-              <span>
-                No new analysis progress has been reported for{" "}
-                {formatElapsedTime(secondsSinceProgressUpdate)}. A section may
-                be taking longer than usual. Completed section notes are shown
-                below. Check that the backend and AI service are responding if
-                this message continues.
-              </span>
+            <div className="progress-stall-warning" role="status" style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
+              <div style={{ display: "flex", alignItems: "flex-start", gap: "10px" }}>
+                <AlertCircle size={18} style={{ flexShrink: 0, marginTop: "2px" }} />
+                <span>
+                  No new analysis progress has been reported for{" "}
+                  {formatElapsedTime(secondsSinceProgressUpdate)}. A section may
+                  be taking longer than usual. Completed section notes are shown
+                  below. Check that the backend and AI service are responding if
+                  this message continues.
+                </span>
+              </div>
+              <div style={{ display: "flex", gap: "10px", marginTop: "4px" }}>
+                <button
+                  type="button"
+                  onClick={handleResetStalledTask}
+                  style={{
+                    padding: "7px 14px",
+                    background: "#b45309",
+                    color: "#ffffff",
+                    border: "none",
+                    borderRadius: "6px",
+                    fontSize: "12px",
+                    fontWeight: 600,
+                    cursor: "pointer",
+                    display: "flex",
+                    alignItems: "center",
+                    gap: "6px",
+                  }}
+                >
+                  🔄 Reset Stalled Task & Start Fresh
+                </button>
+              </div>
             </div>
           )}
         </section>
