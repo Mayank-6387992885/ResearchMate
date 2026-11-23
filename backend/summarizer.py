@@ -70,8 +70,8 @@ def _resolve_gemini_models(api_key: str) -> list[str]:
         return _cached_gemini_models
 
     defaults = [
-        "gemini-2.5-flash-lite",
         "gemini-2.5-flash",
+        "gemini-2.5-flash-lite",
         "gemini-2.0-flash",
     ]
 
@@ -87,19 +87,29 @@ def _resolve_gemini_models(api_key: str) -> list[str]:
                 for m in data.get("models", [])
                 if "generateContent" in m.get("supportedGenerationMethods", [])
             ]
-            flash_models = [m for m in available if "flash" in m.lower()]
+            # Exclude non-text models (audio, tts, embedding, imagen)
+            text_models = [
+                m for m in available
+                if not any(tag in m.lower() for tag in ("tts", "audio", "embed", "imagen"))
+            ]
+            flash_models = [m for m in text_models if "flash" in m.lower()]
             if flash_models:
-                prioritized = sorted(
-                    flash_models,
-                    key=lambda x: ("2.5" in x, "lite" in x, "2.0" in x, x),
-                    reverse=True,
-                )
+                def _model_priority(name: str) -> int:
+                    if name == "gemini-2.5-flash":
+                        return 100
+                    if name == "gemini-2.5-flash-lite":
+                        return 90
+                    if name == "gemini-2.0-flash":
+                        return 80
+                    return 50
+
+                prioritized = sorted(flash_models, key=_model_priority, reverse=True)
                 _cached_gemini_models = prioritized
-                print(f"[AI] Discovered available Gemini models: {prioritized[:3]}", flush=True)
+                print(f"[AI] Discovered available text Gemini models: {prioritized[:3]}", flush=True)
                 return prioritized
-            if available:
-                _cached_gemini_models = available
-                return available
+            if text_models:
+                _cached_gemini_models = text_models
+                return text_models
     except Exception as exc:
         print(f"[AI] Note: could not query Gemini models list ({exc}); using defaults.", flush=True)
 
@@ -163,7 +173,8 @@ def _stream_gemini(
                 stream=True,
                 timeout=REQUEST_TIMEOUT,
             ) as response:
-                if response.status_code == 404 and len(candidate_models) > 1 and model != candidate_models[-1]:
+                if response.status_code in (400, 404) and len(candidate_models) > 1 and model != candidate_models[-1]:
+                    print(f"[AI] Gemini model '{model}' returned HTTP {response.status_code}; trying next candidate...", flush=True)
                     continue
                 if not response.ok:
                     err_detail = response.text[:300]
@@ -191,7 +202,7 @@ def _stream_gemini(
                                         progress_callback("".join(response_text))
         except Exception as exc:
             last_error = exc
-            if model != candidate_models[-1] and "404" in str(exc):
+            if model != candidate_models[-1] and ("404" in str(exc) or "400" in str(exc)):
                 continue
             raise
         finally:
@@ -460,7 +471,7 @@ def _cache_path(paper_text: str) -> Path:
     """Return a stable cache filename for this exact paper and configuration."""
     provider = get_active_provider()
     model = (
-        os.getenv("GEMINI_MODEL", "gemini-2.5-flash-lite") if provider == "gemini"
+        os.getenv("GEMINI_MODEL", "gemini-2.5-flash") if provider == "gemini"
         else os.getenv("GROQ_MODEL", "llama-3.3-70b-versatile") if provider == "groq"
         else MODEL_NAME
     )
