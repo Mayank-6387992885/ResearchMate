@@ -16,6 +16,58 @@ import { formatSummaryText } from "../utils/formatSummary";
 const ACTIVE_TASK_KEY = "researchmate.activeSummaryTask";
 const PROGRESS_SAMPLES_KEY = "researchmate.progressSamples";
 
+export const AI_MODELS = [
+  {
+    key: "gemini:gemini-2.5-flash",
+    provider: "gemini",
+    model: "gemini-2.5-flash",
+    label: "⚡ Google Gemini 2.5 Flash (Free & Recommended)",
+    badge: "Free Cloud",
+  },
+  {
+    key: "gemini:gemini-2.5-flash-lite",
+    provider: "gemini",
+    model: "gemini-2.5-flash-lite",
+    label: "⚡ Google Gemini 2.5 Flash Lite (Fast & Free)",
+    badge: "Free Cloud",
+  },
+  {
+    key: "gemini:gemini-2.0-flash",
+    provider: "gemini",
+    model: "gemini-2.0-flash",
+    label: "⚡ Google Gemini 2.0 Flash (Stable & Free)",
+    badge: "Free Cloud",
+  },
+  {
+    key: "groq:llama-3.3-70b-versatile",
+    provider: "groq",
+    model: "llama-3.3-70b-versatile",
+    label: "⚡ Groq Cloud - Llama 3.3 70B (High Speed & Free)",
+    badge: "Groq Cloud",
+  },
+  {
+    key: "grok:grok-2-latest",
+    provider: "grok",
+    model: "grok-2-latest",
+    label: "🚀 xAI Grok 2 (Requires Paid xAI Credits)",
+    badge: "xAI API",
+  },
+  {
+    key: "grok:grok-beta",
+    provider: "grok",
+    model: "grok-beta",
+    label: "🚀 xAI Grok Beta (Requires Paid xAI Credits)",
+    badge: "xAI API",
+  },
+  {
+    key: "ollama:default",
+    provider: "ollama",
+    model: "default",
+    label: "💻 Local Ollama (localhost:11434 / Offline)",
+    badge: "Local PC",
+  },
+];
+
 function formatRemainingTime(seconds) {
   const totalSeconds = Math.ceil(seconds);
   const hours = Math.floor(totalSeconds / 3600);
@@ -74,18 +126,29 @@ export default function AutoSummary() {
   const [taskFinishedAt, setTaskFinishedAt] = useState(null);
   const [backendUpdatedAt, setBackendUpdatedAt] = useState(null);
   const [clockNow, setClockNow] = useState(Date.now());
-  const [selectedAiProvider, setSelectedAiProvider] = useState(() => {
+  const [selectedAiModelKey, setSelectedAiModelKey] = useState(() => {
     try {
-      return window.localStorage.getItem("researchmate.ai_provider") || (isLocalApi() ? "ollama" : "gemini");
+      const savedKey = window.localStorage.getItem("researchmate.ai_model_key");
+      if (savedKey) return savedKey;
+      const savedProv = window.localStorage.getItem("researchmate.ai_provider");
+      if (savedProv === "grok") return "grok:grok-2-latest";
+      if (savedProv === "groq") return "groq:llama-3.3-70b-versatile";
+      if (savedProv === "ollama") return "ollama:default";
+      return isLocalApi() ? "ollama:default" : "gemini:gemini-2.5-flash";
     } catch {
-      return isLocalApi() ? "ollama" : "gemini";
+      return isLocalApi() ? "ollama:default" : "gemini:gemini-2.5-flash";
     }
   });
 
-  const handleSelectAiProvider = (provider) => {
-    setSelectedAiProvider(provider);
+  const selectedAiProvider = selectedAiModelKey.split(":")[0];
+  const selectedAiModel = selectedAiModelKey.split(":")[1] || "";
+
+  const handleModelChange = (modelKey) => {
+    setSelectedAiModelKey(modelKey);
+    const prov = modelKey.split(":")[0];
     try {
-      window.localStorage.setItem("researchmate.ai_provider", provider);
+      window.localStorage.setItem("researchmate.ai_model_key", modelKey);
+      window.localStorage.setItem("researchmate.ai_provider", prov);
     } catch {}
   };
   const uploadControllerRef = useRef(null);
@@ -359,6 +422,7 @@ export default function AutoSummary() {
           headers: {
             "X-Task-ID": currentTaskId,
             "X-AI-Provider": selectedAiProvider,
+            "X-AI-Model": selectedAiModel === "default" ? "" : selectedAiModel,
           },
           body: formData,
           signal: uploadController.signal,
@@ -459,67 +523,112 @@ export default function AutoSummary() {
         </div>
 
         <div
-          className="ai-provider-selector-card"
+          className="ai-model-selector-card"
           style={{
             margin: "0 0 16px 0",
-            padding: "10px 14px",
+            padding: "12px 14px",
             background: "var(--bg-subtle, rgba(0, 0, 0, 0.02))",
             border: "1px solid var(--border-color, rgba(0, 0, 0, 0.08))",
             borderRadius: "10px",
             display: "flex",
-            alignItems: "center",
-            justifyContent: "space-between",
-            flexWrap: "wrap",
+            flexDirection: "column",
             gap: "10px",
           }}
         >
-          <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-            <Sparkles size={16} color="var(--primary, #4f46e5)" />
-            <div>
-              <span style={{ fontSize: "13px", fontWeight: 600, color: "var(--text-primary)" }}>
-                AI Provider:
-              </span>
-              <span style={{ fontSize: "12px", color: "var(--text-secondary, #64748b)", marginLeft: "6px" }}>
-                {selectedAiProvider === "gemini" && "Google Gemini Cloud"}
-                {selectedAiProvider === "grok" && "xAI Grok / Groq Cloud"}
-                {selectedAiProvider === "ollama" && "Local Ollama (localhost:11434)"}
-              </span>
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: "10px" }}>
+            <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+              <Sparkles size={16} color="var(--primary, #4f46e5)" />
+              <div>
+                <span style={{ fontSize: "13px", fontWeight: 600, color: "var(--text-primary)" }}>
+                  AI Model & Server:
+                </span>
+                <span style={{ fontSize: "12px", color: "var(--text-secondary, #64748b)", marginLeft: "6px" }}>
+                  {selectedAiProvider === "gemini" && "(Google Gemini Cloud - Free)"}
+                  {selectedAiProvider === "groq" && "(Groq Cloud - Ultra Fast)"}
+                  {selectedAiProvider === "grok" && "(xAI Grok API - Requires Credits)"}
+                  {selectedAiProvider === "ollama" && "(Local Ollama - localhost:11434)"}
+                </span>
+              </div>
+            </div>
+
+            <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+              <label htmlFor="ai-model-dropdown" style={{ fontSize: "12px", color: "var(--text-secondary, #64748b)", fontWeight: 500 }}>
+                Choose Model:
+              </label>
+              <select
+                id="ai-model-dropdown"
+                value={selectedAiModelKey}
+                disabled={isProcessing}
+                onChange={(e) => handleModelChange(e.target.value)}
+                style={{
+                  padding: "5px 12px",
+                  borderRadius: "8px",
+                  fontSize: "12px",
+                  fontWeight: 600,
+                  border: "1px solid var(--border-color, rgba(0, 0, 0, 0.15))",
+                  background: "var(--bg-card, #ffffff)",
+                  color: "var(--text-primary, #1e293b)",
+                  cursor: isProcessing ? "not-allowed" : "pointer",
+                  outline: "none",
+                  boxShadow: "0 1px 3px rgba(0,0,0,0.06)",
+                }}
+              >
+                <optgroup label="⚡ Google Gemini Cloud (Free Tier)">
+                  <option value="gemini:gemini-2.5-flash">⚡ Gemini 2.5 Flash (Recommended)</option>
+                  <option value="gemini:gemini-2.5-flash-lite">⚡ Gemini 2.5 Flash Lite</option>
+                  <option value="gemini:gemini-2.0-flash">⚡ Gemini 2.0 Flash</option>
+                </optgroup>
+                <optgroup label="⚡ Groq Cloud (Free & Ultra Fast)">
+                  <option value="groq:llama-3.3-70b-versatile">⚡ Groq - Llama 3.3 70B</option>
+                  <option value="groq:llama-3.1-8b-instant">⚡ Groq - Llama 3.1 8B</option>
+                </optgroup>
+                <optgroup label="🚀 xAI Grok (Requires Paid Credits)">
+                  <option value="grok:grok-2-latest">🚀 xAI Grok 2 (Latest)</option>
+                  <option value="grok:grok-beta">🚀 xAI Grok Beta</option>
+                </optgroup>
+                <optgroup label="💻 Local Ollama (Offline)">
+                  <option value="ollama:default">💻 Local Ollama (Default Model)</option>
+                </optgroup>
+              </select>
             </div>
           </div>
 
-          <div style={{ display: "flex", gap: "6px", flexWrap: "wrap" }}>
-            {[
-              { id: "gemini", label: "⚡ Gemini", desc: "Google Gemini Cloud API" },
-              { id: "grok", label: "🚀 Grok", desc: "xAI Grok / Groq Cloud API" },
-              { id: "ollama", label: "💻 Local", desc: "Ollama running on localhost:11434" },
-            ].map((p) => {
-              const active = selectedAiProvider === p.id;
-              return (
-                <button
-                  key={p.id}
-                  type="button"
-                  title={p.desc}
-                  disabled={isProcessing}
-                  onClick={() => handleSelectAiProvider(p.id)}
-                  style={{
-                    padding: "5px 14px",
-                    borderRadius: "20px",
-                    fontSize: "12px",
-                    fontWeight: active ? 600 : 500,
-                    cursor: isProcessing ? "not-allowed" : "pointer",
-                    border: active
-                      ? "1px solid #4f46e5"
-                      : "1px solid var(--border-color, rgba(0, 0, 0, 0.12))",
-                    background: active ? "#4f46e5" : "transparent",
-                    color: active ? "#ffffff" : "var(--text-primary)",
-                    transition: "all 0.15s ease",
-                    boxShadow: active ? "0 2px 6px rgba(79, 70, 229, 0.25)" : "none",
-                  }}
-                >
-                  {p.label}
-                </button>
-              );
-            })}
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: "8px", paddingTop: "6px", borderTop: "1px solid var(--border-color, rgba(0,0,0,0.05))" }}>
+            <div style={{ display: "flex", gap: "6px", flexWrap: "wrap" }}>
+              {[
+                { id: "gemini:gemini-2.5-flash", label: "⚡ Gemini" },
+                { id: "groq:llama-3.3-70b-versatile", label: "⚡ Groq" },
+                { id: "grok:grok-2-latest", label: "🚀 Grok" },
+                { id: "ollama:default", label: "💻 Local" },
+              ].map((p) => {
+                const active = selectedAiModelKey === p.id || (p.id.startsWith("gemini") && selectedAiProvider === "gemini") || (p.id.startsWith("grok") && selectedAiProvider === "grok");
+                return (
+                  <button
+                    key={p.id}
+                    type="button"
+                    disabled={isProcessing}
+                    onClick={() => handleModelChange(p.id)}
+                    style={{
+                      padding: "4px 12px",
+                      borderRadius: "16px",
+                      fontSize: "11px",
+                      fontWeight: active ? 600 : 500,
+                      cursor: isProcessing ? "not-allowed" : "pointer",
+                      border: active
+                        ? "1px solid #4f46e5"
+                        : "1px solid var(--border-color, rgba(0, 0, 0, 0.12))",
+                      background: active ? "#4f46e5" : "transparent",
+                      color: active ? "#ffffff" : "var(--text-primary)",
+                    }}
+                  >
+                    {p.label}
+                  </button>
+                );
+              })}
+            </div>
+            <span style={{ fontSize: "11px", color: "var(--text-secondary, #64748b)" }}>
+              🛡️ <strong>Auto-Failover:</strong> Automatically switches models if quota or credit errors occur.
+            </span>
           </div>
         </div>
 
@@ -645,77 +754,149 @@ export default function AutoSummary() {
       )}
 
       {error && (
-        <div className="error-message" role="alert" style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
-          <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-            <AlertCircle size={18} />
-            <span>{error}</span>
+        <div className="error-message" role="alert" style={{ display: "flex", flexDirection: "column", gap: "10px", padding: "14px 16px", background: "rgba(239, 68, 68, 0.08)", border: "1px solid rgba(239, 68, 68, 0.25)", borderRadius: "8px" }}>
+          <div style={{ display: "flex", alignItems: "flex-start", gap: "10px" }}>
+            <AlertCircle size={20} style={{ color: "#ef4444", flexShrink: 0, marginTop: "2px" }} />
+            <div style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
+              <strong style={{ color: "#b91c1c", fontSize: "14px" }}>AI Model Error</strong>
+              <span style={{ fontSize: "13px", color: "var(--text-primary)" }}>{error}</span>
+            </div>
           </div>
 
-          {/* Quick AI Provider Switchers on error */}
-          <div style={{ display: "flex", gap: "8px", flexWrap: "wrap", marginTop: "4px" }}>
-            {selectedAiProvider !== "gemini" && (
-              <button
-                type="button"
-                style={{
-                  padding: "5px 12px",
-                  background: "#4f46e5",
-                  color: "#fff",
-                  borderRadius: "6px",
-                  border: "none",
-                  fontSize: "12px",
-                  fontWeight: 600,
-                  cursor: "pointer",
-                }}
-                onClick={() => {
-                  handleSelectAiProvider("gemini");
+          {/* Dropdown Box to choose required AI model manually upon error */}
+          <div style={{
+            marginTop: "6px",
+            padding: "10px 12px",
+            background: "rgba(255, 255, 255, 0.8)",
+            border: "1px solid rgba(0, 0, 0, 0.08)",
+            borderRadius: "6px",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "space-between",
+            flexWrap: "wrap",
+            gap: "10px",
+          }}>
+            <div style={{ fontSize: "12px", color: "var(--text-primary)", fontWeight: 600 }}>
+              🔄 Choose Model to Retry:
+            </div>
+            <div style={{ display: "flex", alignItems: "center", gap: "8px", flexWrap: "wrap" }}>
+              <select
+                value={selectedAiModelKey}
+                onChange={(e) => {
+                  handleModelChange(e.target.value);
                   setError("");
                 }}
-              >
-                Switch to ⚡ Gemini
-              </button>
-            )}
-            {selectedAiProvider !== "grok" && (
-              <button
-                type="button"
                 style={{
-                  padding: "5px 12px",
-                  background: "#4f46e5",
-                  color: "#fff",
+                  padding: "5px 10px",
                   borderRadius: "6px",
-                  border: "none",
-                  fontSize: "12px",
-                  fontWeight: 600,
-                  cursor: "pointer",
-                }}
-                onClick={() => {
-                  handleSelectAiProvider("grok");
-                  setError("");
-                }}
-              >
-                Switch to 🚀 Grok
-              </button>
-            )}
-            {selectedAiProvider !== "ollama" && (
-              <button
-                type="button"
-                style={{
-                  padding: "5px 12px",
-                  background: "transparent",
-                  color: "var(--text-primary)",
-                  borderRadius: "6px",
-                  border: "1px solid var(--border-color, rgba(0,0,0,0.2))",
                   fontSize: "12px",
                   fontWeight: 500,
+                  border: "1px solid rgba(0,0,0,0.18)",
+                  background: "#fff",
+                  color: "#1e293b",
+                  outline: "none",
+                }}
+              >
+                <optgroup label="⚡ Google Gemini Cloud (Free Tier)">
+                  <option value="gemini:gemini-2.5-flash">⚡ Switch to Google Gemini 2.5 Flash (Free)</option>
+                  <option value="gemini:gemini-2.5-flash-lite">⚡ Switch to Gemini 2.5 Flash Lite</option>
+                  <option value="gemini:gemini-2.0-flash">⚡ Switch to Gemini 2.0 Flash</option>
+                </optgroup>
+                <optgroup label="⚡ Groq Cloud (Free & Ultra Fast)">
+                  <option value="groq:llama-3.3-70b-versatile">⚡ Switch to Groq (Llama 3.3 70B)</option>
+                  <option value="groq:llama-3.1-8b-instant">⚡ Switch to Groq (Llama 3.1 8B)</option>
+                </optgroup>
+                <optgroup label="🚀 xAI Grok (Requires Paid Credits)">
+                  <option value="grok:grok-2-latest">🚀 Switch to xAI Grok 2</option>
+                  <option value="grok:grok-beta">🚀 Switch to xAI Grok Beta</option>
+                </optgroup>
+                <optgroup label="💻 Local Ollama (Offline)">
+                  <option value="ollama:default">💻 Switch to Local Ollama</option>
+                </optgroup>
+              </select>
+
+              <button
+                type="button"
+                style={{
+                  padding: "6px 14px",
+                  background: "#4f46e5",
+                  color: "#fff",
+                  borderRadius: "6px",
+                  border: "none",
+                  fontSize: "12px",
+                  fontWeight: 600,
                   cursor: "pointer",
                 }}
                 onClick={() => {
-                  handleSelectAiProvider("ollama");
                   setError("");
+                  if (file) {
+                    handleUpload();
+                  }
                 }}
               >
-                Switch to 💻 Local Ollama
+                Retry Analysis
               </button>
-            )}
+            </div>
+          </div>
+
+          <div style={{ display: "flex", gap: "6px", flexWrap: "wrap", marginTop: "2px" }}>
+            <button
+              type="button"
+              style={{
+                padding: "4px 10px",
+                background: selectedAiProvider === "gemini" ? "#4f46e5" : "transparent",
+                color: selectedAiProvider === "gemini" ? "#fff" : "var(--text-primary)",
+                borderRadius: "6px",
+                border: "1px solid rgba(0,0,0,0.15)",
+                fontSize: "11px",
+                fontWeight: 500,
+                cursor: "pointer",
+              }}
+              onClick={() => {
+                handleModelChange("gemini:gemini-2.5-flash");
+                setError("");
+              }}
+            >
+              ⚡ Use Gemini (Free)
+            </button>
+            <button
+              type="button"
+              style={{
+                padding: "4px 10px",
+                background: selectedAiProvider === "groq" ? "#4f46e5" : "transparent",
+                color: selectedAiProvider === "groq" ? "#fff" : "var(--text-primary)",
+                borderRadius: "6px",
+                border: "1px solid rgba(0,0,0,0.15)",
+                fontSize: "11px",
+                fontWeight: 500,
+                cursor: "pointer",
+              }}
+              onClick={() => {
+                handleModelChange("groq:llama-3.3-70b-versatile");
+                setError("");
+              }}
+            >
+              ⚡ Use Groq (Fast)
+            </button>
+            <button
+              type="button"
+              style={{
+                padding: "4px 10px",
+                background: selectedAiProvider === "ollama" ? "#4f46e5" : "transparent",
+                color: selectedAiProvider === "ollama" ? "#fff" : "var(--text-primary)",
+                borderRadius: "6px",
+                border: "1px solid rgba(0,0,0,0.15)",
+                fontSize: "11px",
+                fontWeight: 500,
+                cursor: "pointer",
+              }}
+              onClick={() => {
+                handleModelChange("ollama:default");
+                setError("");
+              }}
+            >
+              💻 Use Local Ollama
+            </button>
           </div>
 
           {!isLocalApi() && (error.toLowerCase().includes("ollama") || error.toLowerCase().includes("11434") || error.toLowerCase().includes("gemini") || error.toLowerCase().includes("grok")) && (
@@ -729,7 +910,7 @@ export default function AutoSummary() {
               color: "var(--text-primary)"
             }}>
               <p style={{ margin: "0 0 8px 0" }}>
-                💡 <strong>To run on Render Cloud:</strong> Add <code>GEMINI_API_KEY</code> (free from <a href="https://aistudio.google.com/app/apikey" target="_blank" rel="noreferrer" style={{ color: "#4f46e5", textDecoration: "underline" }}>Google AI Studio</a>), <code>XAI_API_KEY</code> (from <a href="https://console.x.ai" target="_blank" rel="noreferrer" style={{ color: "#4f46e5", textDecoration: "underline" }}>xAI Console</a>), or <code>GROQ_API_KEY</code> to your Render Dashboard under Environment Variables.
+                💡 <strong>To run on Render Cloud:</strong> Add <code>GEMINI_API_KEY</code> (free from <a href="https://aistudio.google.com/app/apikey" target="_blank" rel="noreferrer" style={{ color: "#4f46e5", textDecoration: "underline" }}>Google AI Studio</a>), <code>GROQ_API_KEY</code> (free from <a href="https://console.groq.com" target="_blank" rel="noreferrer" style={{ color: "#4f46e5", textDecoration: "underline" }}>Groq Console</a>), or <code>XAI_API_KEY</code> to your Render Dashboard under Environment Variables.
               </p>
               <p style={{ margin: "0 0 10px 0" }}>
                 Alternatively, switch to your local backend to summarize using your PC's local Ollama:
@@ -760,6 +941,25 @@ export default function AutoSummary() {
 
       {result && (
         <>
+          {result.fallback_notice && (
+            <div style={{
+              display: "flex",
+              alignItems: "center",
+              gap: "10px",
+              padding: "10px 14px",
+              background: "rgba(79, 70, 229, 0.08)",
+              border: "1px solid rgba(79, 70, 229, 0.25)",
+              borderRadius: "8px",
+              fontSize: "13px",
+              color: "var(--text-primary)",
+              marginBottom: "16px",
+            }}>
+              <Sparkles size={16} color="#4f46e5" />
+              <span>
+                <strong>Automatic Failover Notice:</strong> {result.fallback_notice}
+              </span>
+            </div>
+          )}
           <div className="result-stats">
             <div className="panel stat-card"><span>Pages</span><strong>{result.pages}</strong></div>
             <div className="panel stat-card"><span>Characters extracted</span><strong>{Number(result.characters).toLocaleString()}</strong></div>

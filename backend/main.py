@@ -27,7 +27,7 @@ from models.research_paper import ResearchPaper  # Ensure model is registered wi
 from models.sms_verification import SmsVerification  # Ensure model is registered with SQLAlchemy.
 from models.user import User
 import services.paper_service as paper_service
-from summarizer import summarize_paper
+from summarizer import get_last_fallback_notice, set_last_fallback_notice, summarize_paper
 
 app = FastAPI(title="ResearchMate API")
 
@@ -315,6 +315,7 @@ async def upload_paper(
     file: UploadFile = File(...),
     x_task_id: str | None = Header(default=None, alias="X-Task-ID"),
     x_ai_provider: str | None = Header(default=None, alias="X-AI-Provider"),
+    x_ai_model: str | None = Header(default=None, alias="X-AI-Model"),
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
@@ -369,12 +370,14 @@ async def upload_paper(
 
         report_progress(15, "Text extracted. Preparing AI summarization...")
 
+        set_last_fallback_notice(None)
         # Persist chunk-level updates so every frontend poll sees the same task state.
         summary = await run_in_threadpool(
             summarize_paper,
             text,
             report_progress,
             x_ai_provider,
+            x_ai_model,
         )
 
         paper = getattr(paper_service, "create_paper")(
@@ -415,6 +418,7 @@ async def upload_paper(
                 summary,
                 report_classification_progress,
                 x_ai_provider,
+                x_ai_model,
             )
         except RuntimeError as exc:
             classification_error = str(exc)
@@ -425,6 +429,7 @@ async def upload_paper(
             )
 
         total_time = time.time() - start_time
+        fallback_notice = get_last_fallback_notice()
         result = {
             "task_id": task_id,
             **paper_to_dict(paper),
@@ -432,6 +437,8 @@ async def upload_paper(
             "preview": text[:1000],
             "processing_time_seconds": round(total_time, 2),
         }
+        if fallback_notice:
+            result["fallback_notice"] = fallback_notice
         if classification_error:
             result["classification_error"] = classification_error
         set_progress(

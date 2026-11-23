@@ -20,6 +20,18 @@ CACHE_DIR = Path(tempfile.gettempdir()) / "researchmate_summary_cache"
 
 ProgressCallback = Callable[[int, str, dict[str, Any] | None], None] | None
 
+_last_fallback_notice: str | None = None
+
+
+def get_last_fallback_notice() -> str | None:
+    global _last_fallback_notice
+    return _last_fallback_notice
+
+
+def set_last_fallback_notice(notice: str | None) -> None:
+    global _last_fallback_notice
+    _last_fallback_notice = notice
+
 
 def get_active_provider(override: str | None = None) -> str:
     """Determine the active AI provider: 'gemini', 'grok', 'groq', or 'ollama'.
@@ -134,13 +146,18 @@ def _stream_gemini(
     *,
     json_format: bool = False,
     heartbeat_callback: Callable[[], None] | None = None,
+    model: str | None = None,
 ) -> str:
     """Generate response via Google Gemini REST API (Server-Sent Events streaming)."""
     api_key = os.getenv("GEMINI_API_KEY", "").strip()
     if not api_key:
         raise RuntimeError("GEMINI_API_KEY is not set.")
 
-    candidate_models = _resolve_gemini_models(api_key)
+    resolved = _resolve_gemini_models(api_key)
+    if model:
+        candidate_models = [model] + [m for m in resolved if m != model]
+    else:
+        candidate_models = resolved
 
     generation_config: dict[str, Any] = {
         "temperature": 0.2,
@@ -258,6 +275,7 @@ def _stream_grok(
     *,
     json_format: bool = False,
     heartbeat_callback: Callable[[], None] | None = None,
+    model: str | None = None,
 ) -> str:
     """Generate response via xAI Grok REST API (OpenAI-compatible streaming)."""
     api_key = os.getenv("XAI_API_KEY", "").strip() or os.getenv("GROK_API_KEY", "").strip()
@@ -269,14 +287,15 @@ def _stream_grok(
                 progress_callback=progress_callback,
                 json_format=json_format,
                 heartbeat_callback=heartbeat_callback,
+                model=model,
             )
         raise RuntimeError("Neither XAI_API_KEY nor GROK_API_KEY is configured in your environment.")
 
-    model = os.getenv("GROK_MODEL", "").strip() or "grok-2-latest"
+    active_model = model or os.getenv("GROK_MODEL", "").strip() or "grok-2-latest"
     url = "https://api.x.ai/v1/chat/completions"
 
     payload: dict[str, Any] = {
-        "model": model,
+        "model": active_model,
         "messages": [{"role": "user", "content": prompt}],
         "temperature": 0.2,
         "max_tokens": max_tokens,
@@ -360,17 +379,18 @@ def _stream_groq(
     *,
     json_format: bool = False,
     heartbeat_callback: Callable[[], None] | None = None,
+    model: str | None = None,
 ) -> str:
     """Generate response via Groq Cloud REST API (OpenAI-compatible streaming)."""
     api_key = os.getenv("GROQ_API_KEY", "").strip()
     if not api_key:
         raise RuntimeError("GROQ_API_KEY is not set.")
 
-    model = os.getenv("GROQ_MODEL", "").strip() or "llama-3.3-70b-versatile"
+    active_model = model or os.getenv("GROQ_MODEL", "").strip() or "llama-3.3-70b-versatile"
     url = "https://api.groq.com/openai/v1/chat/completions"
 
     payload: dict[str, Any] = {
-        "model": model,
+        "model": active_model,
         "messages": [{"role": "user", "content": prompt}],
         "temperature": 0.2,
         "max_tokens": max_tokens,
@@ -454,6 +474,7 @@ def _stream_ollama(
     *,
     json_format: bool = True,
     heartbeat_callback: Callable[[], None] | None = None,
+    model: str | None = None,
 ) -> str:
     """Generate response via local Ollama daemon."""
     response_text = []
@@ -476,7 +497,7 @@ def _stream_ollama(
 
     try:
         payload = {
-            "model": MODEL_NAME,
+            "model": model or MODEL_NAME,
             "prompt": prompt,
             "stream": True,
             "options": {
@@ -534,100 +555,110 @@ def stream_ollama(
     json_format: bool = True,
     heartbeat_callback: Callable[[], None] | None = None,
     provider: str | None = None,
+    model: str | None = None,
 ) -> str:
-    """Dispatches generation to active AI provider (Gemini, Grok, Groq, or Ollama fallback)."""
+    """Dispatches generation to active AI provider with robust multi-provider error failover."""
     active_provider = get_active_provider(provider)
 
-    if active_provider == "gemini":
-        try:
+    def _execute_provider(prov: str) -> str:
+        prov_model = model if prov == active_provider else None
+        if prov == "gemini":
+            if not os.getenv("GEMINI_API_KEY", "").strip():
+                raise RuntimeError("GEMINI_API_KEY is not set.")
             return _stream_gemini(
                 prompt,
                 max_tokens=max_tokens,
                 progress_callback=progress_callback,
                 json_format=json_format,
                 heartbeat_callback=heartbeat_callback,
+                model=prov_model,
             )
-        except Exception as exc:
-            # If Grok / Groq is configured, fail over automatically
-            if os.getenv("XAI_API_KEY") or os.getenv("GROK_API_KEY"):
-                print(f"[AI] Gemini call failed ({exc}); falling back to Grok.", flush=True)
-                return _stream_grok(
-                    prompt,
-                    max_tokens=max_tokens,
-                    progress_callback=progress_callback,
-                    json_format=json_format,
-                    heartbeat_callback=heartbeat_callback,
-                )
-            if os.getenv("GROQ_API_KEY"):
-                print(f"[AI] Gemini call failed ({exc}); falling back to Groq.", flush=True)
-                return _stream_groq(
-                    prompt,
-                    max_tokens=max_tokens,
-                    progress_callback=progress_callback,
-                    json_format=json_format,
-                    heartbeat_callback=heartbeat_callback,
-                )
-            # Fall back to local Ollama if running on a machine with responsive Ollama
-            if _is_local_ollama_available():
-                print(f"[AI] Gemini call failed ({exc}); falling back to local Ollama.", flush=True)
-                return _stream_ollama(
-                    prompt,
-                    max_tokens=max_tokens,
-                    progress_callback=progress_callback,
-                    json_format=json_format,
-                    heartbeat_callback=heartbeat_callback,
-                )
-            raise
-
-    if active_provider == "grok":
-        try:
+        if prov == "grok":
+            if not (os.getenv("XAI_API_KEY", "").strip() or os.getenv("GROK_API_KEY", "").strip()):
+                raise RuntimeError("XAI_API_KEY / GROK_API_KEY is not set.")
             return _stream_grok(
                 prompt,
                 max_tokens=max_tokens,
                 progress_callback=progress_callback,
                 json_format=json_format,
                 heartbeat_callback=heartbeat_callback,
+                model=prov_model,
             )
-        except Exception as exc:
-            if _is_local_ollama_available():
-                print(f"[AI] Grok call failed ({exc}); falling back to local Ollama.", flush=True)
-                return _stream_ollama(
-                    prompt,
-                    max_tokens=max_tokens,
-                    progress_callback=progress_callback,
-                    json_format=json_format,
-                    heartbeat_callback=heartbeat_callback,
-                )
-            raise
-
-    if active_provider == "groq":
-        try:
+        if prov == "groq":
+            if not os.getenv("GROQ_API_KEY", "").strip():
+                raise RuntimeError("GROQ_API_KEY is not set.")
             return _stream_groq(
                 prompt,
                 max_tokens=max_tokens,
                 progress_callback=progress_callback,
                 json_format=json_format,
                 heartbeat_callback=heartbeat_callback,
+                model=prov_model,
             )
-        except Exception as exc:
-            if _is_local_ollama_available():
-                print(f"[AI] Groq call failed ({exc}); falling back to local Ollama.", flush=True)
-                return _stream_ollama(
-                    prompt,
-                    max_tokens=max_tokens,
-                    progress_callback=progress_callback,
-                    json_format=json_format,
-                    heartbeat_callback=heartbeat_callback,
-                )
-            raise
+        if prov == "ollama":
+            if not _is_local_ollama_available():
+                raise RuntimeError("Local Ollama daemon is unreachable at localhost:11434.")
+            return _stream_ollama(
+                prompt,
+                max_tokens=max_tokens,
+                progress_callback=progress_callback,
+                json_format=json_format,
+                heartbeat_callback=heartbeat_callback,
+                model=prov_model,
+            )
+        raise ValueError(f"Unknown AI provider '{prov}'.")
 
-    return _stream_ollama(
-        prompt,
-        max_tokens=max_tokens,
-        progress_callback=progress_callback,
-        json_format=json_format,
-        heartbeat_callback=heartbeat_callback,
-    )
+    all_providers = ["gemini", "groq", "grok", "ollama"]
+    ordered_providers = [active_provider] + [p for p in all_providers if p != active_provider]
+
+    last_error: Exception | None = None
+
+    for i, prov in enumerate(ordered_providers):
+        # Skip cloud providers whose API keys are not configured at all (except primary request)
+        if i > 0:
+            if prov == "gemini" and not os.getenv("GEMINI_API_KEY", "").strip():
+                continue
+            if prov == "grok" and not (os.getenv("XAI_API_KEY", "").strip() or os.getenv("GROK_API_KEY", "").strip()):
+                continue
+            if prov == "groq" and not os.getenv("GROQ_API_KEY", "").strip():
+                continue
+            if prov == "ollama" and not _is_local_ollama_available():
+                continue
+
+        try:
+            result = _execute_provider(prov)
+            if i > 0 and last_error is not None:
+                provider_names = {
+                    "gemini": "Google Gemini",
+                    "grok": "xAI Grok",
+                    "groq": "Groq Cloud",
+                    "ollama": "Local Ollama",
+                }
+                failed_name = provider_names.get(active_provider, active_provider)
+                succeeded_name = provider_names.get(prov, prov)
+                clean_err = str(last_error)
+                if "403" in clean_err or "permission-denied" in clean_err:
+                    reason = "credits/license required (HTTP 403)"
+                elif "503" in clean_err or "high demand" in clean_err:
+                    reason = "high demand (HTTP 503)"
+                elif "429" in clean_err or "quota" in clean_err:
+                    reason = "rate limit / quota reached"
+                elif "Ollama" in clean_err or "localhost" in clean_err:
+                    reason = "server offline"
+                else:
+                    reason = clean_err[:60]
+
+                notice = f"{failed_name} encountered {reason}. Automatically switched to {succeeded_name} to finish your paper summary."
+                print(f"[AI] {notice}", flush=True)
+                set_last_fallback_notice(notice)
+            return result
+        except Exception as exc:
+            last_error = exc
+            print(f"[AI] Provider '{prov}' attempt failed: {exc}", flush=True)
+
+    if last_error:
+        raise last_error
+    raise RuntimeError(f"All AI providers failed. Requested provider was {active_provider}.")
 
 
 # Friendly alias
@@ -639,16 +670,18 @@ def split_text(text: str, chunk_size: int = CHUNK_SIZE) -> list[str]:
     return [text[i:i + chunk_size] for i in range(0, len(text), chunk_size)]
 
 
-def _cache_path(paper_text: str, provider: str | None = None) -> Path:
+def _cache_path(paper_text: str, provider: str | None = None, model: str | None = None) -> Path:
     """Return a stable cache filename for this exact paper and configuration."""
     active = get_active_provider(provider)
-    model = (
-        os.getenv("GEMINI_MODEL", "gemini-2.5-flash") if active == "gemini"
-        else os.getenv("GROK_MODEL", "grok-2-latest") if active == "grok"
-        else os.getenv("GROQ_MODEL", "llama-3.3-70b-versatile") if active == "groq"
-        else MODEL_NAME
+    model_str = (
+        model or (
+            os.getenv("GEMINI_MODEL", "gemini-2.5-flash") if active == "gemini"
+            else os.getenv("GROK_MODEL", "grok-2-latest") if active == "grok"
+            else os.getenv("GROQ_MODEL", "llama-3.3-70b-versatile") if active == "groq"
+            else MODEL_NAME
+        )
     )
-    cache_key = f"{active}|{model}|{CHUNK_SIZE}|{paper_text}"
+    cache_key = f"{active}|{model_str}|{CHUNK_SIZE}|{paper_text}"
     digest = hashlib.sha256(cache_key.encode("utf-8")).hexdigest()
     return CACHE_DIR / f"{digest}.json"
 
@@ -668,6 +701,7 @@ def summarize_paper(
     paper_text: str,
     progress_callback: ProgressCallback = None,
     provider: str | None = None,
+    model: str | None = None,
 ) -> str:
     """Summarize a paper and resume completed chunks from the local cache.
 
@@ -695,7 +729,7 @@ def summarize_paper(
     if not chunks:
         raise ValueError("No text chunks were created from the paper.")
 
-    cache_path = _cache_path(paper_text, provider=provider)
+    cache_path = _cache_path(paper_text, provider=provider, model=model)
 
     try:
         if cache_path.exists():
@@ -770,6 +804,7 @@ PAPER SECTION:
                     json_format=False,
                     heartbeat_callback=report_chunk_heartbeat,
                     provider=provider,
+                    model=model,
                 )
                 chunk_summaries.append(chunk_summary)
 
@@ -847,6 +882,7 @@ Write one clear, well-organized final summary.
             json_format=False,
             heartbeat_callback=report_final_heartbeat,
             provider=provider,
+            model=model,
         )
 
         cache["final_summary"] = final_summary
