@@ -249,6 +249,89 @@
   margin-top: 18px;
 }
 
+.auto-switch-notice-banner {
+  margin: 20px 0;
+  padding: 18px 22px;
+  background: rgba(245, 158, 11, 0.08);
+  border: 1px solid rgba(245, 158, 11, 0.35);
+  border-radius: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  box-shadow: 0 3px 12px rgba(245, 158, 11, 0.06);
+  box-sizing: border-box;
+  width: 100%;
+}
+
+.auto-switch-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.auto-switch-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.auto-switch-title strong {
+  font-size: 13px;
+  color: #b45309;
+}
+
+.auto-switch-badge {
+  font-size: 11px;
+  font-weight: 600;
+  padding: 4px 11px;
+  border-radius: 12px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.auto-switch-badge.processing {
+  color: #047857;
+  background: rgba(16, 185, 129, 0.15);
+}
+
+.auto-switch-badge.completed {
+  color: #4f46e5;
+  background: rgba(79, 70, 229, 0.12);
+}
+
+.auto-switch-error-box {
+  font-size: 12px;
+  color: #30384b;
+  background: rgba(255, 255, 255, 0.85);
+  padding: 10px 14px;
+  border-radius: 8px;
+  border: 1px solid rgba(0, 0, 0, 0.07);
+  word-break: break-word;
+  line-height: 1.5;
+}
+
+.auto-switch-error-label {
+  color: #dc2626;
+  font-weight: 600;
+}
+
+.auto-switch-error-text {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+  font-size: 11px;
+}
+
+.auto-switch-footer {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  color: #047857;
+  font-weight: 600;
+}
+
 .error-message {
   display: flex;
   gap: 9px;
@@ -256,10 +339,12 @@
   color: #b42318;
   background: #fff1f0;
   border: 1px solid #ffd5d2;
-  padding: 13px 15px;
-  border-radius: 10px;
-  margin-top: 18px;
+  padding: 18px 22px;
+  border-radius: 14px;
+  margin: 20px 0;
   font-size: 14px;
+  box-shadow: 0 3px 12px rgba(239, 68, 68, 0.06);
+  box-sizing: border-box;
 }
 
 .result-stats {

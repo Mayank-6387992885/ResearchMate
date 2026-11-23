@@ -956,3 +956,27 @@ html[data-theme="dark"] .settings-required-mark {
 html[data-theme="dark"] .settings-required-note {
   color: #a4a9b2;
 }
+
+html[data-theme="dark"] .auto-switch-notice-banner {
+  background: rgba(245, 158, 11, 0.12);
+  border-color: rgba(245, 158, 11, 0.35);
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.25);
+}
+
+html[data-theme="dark"] .auto-switch-title strong {
+  color: #fbbf24;
+}
+
+html[data-theme="dark"] .auto-switch-error-box {
+  background: rgba(20, 24, 38, 0.85);
+  border-color: rgba(255, 255, 255, 0.09);
+  color: #e2e8f0;
+}
+
+html[data-theme="dark"] .auto-switch-error-label {
+  color: #f87171;
+}
+
+html[data-theme="dark"] .auto-switch-footer {
+  color: #34d399;
+}

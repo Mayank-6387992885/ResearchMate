@@ -776,62 +776,27 @@ export default function AutoSummary() {
         <div
           className="auto-switch-notice-banner"
           role="status"
-          style={{
-            margin: "0 0 16px 0",
-            padding: "14px 16px",
-            background: "rgba(245, 158, 11, 0.09)",
-            border: "1px solid rgba(245, 158, 11, 0.4)",
-            borderRadius: "10px",
-            display: "flex",
-            flexDirection: "column",
-            gap: "8px",
-            boxShadow: "0 2px 8px rgba(245, 158, 11, 0.08)",
-          }}
         >
-          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: "8px" }}>
-            <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+          <div className="auto-switch-header">
+            <div className="auto-switch-title">
               <AlertCircle size={18} color="#d97706" style={{ flexShrink: 0 }} />
-              <strong style={{ fontSize: "13px", color: "#b45309" }}>
-                AI Model Error Detected · Auto-Switching Active
-              </strong>
+              <strong>AI Model Error Detected · Auto-Switching Active</strong>
             </div>
-            <span
-              style={{
-                fontSize: "11px",
-                fontWeight: 600,
-                color: isProcessing ? "#047857" : "#4f46e5",
-                background: isProcessing ? "rgba(16, 185, 129, 0.15)" : "rgba(79, 70, 229, 0.12)",
-                padding: "3px 10px",
-                borderRadius: "12px",
-                display: "flex",
-                alignItems: "center",
-                gap: "5px",
-              }}
-            >
+            <span className={`auto-switch-badge ${isProcessing ? "processing" : "completed"}`}>
               {isProcessing && <LoaderCircle className="spin" size={12} />}
               {isProcessing ? "Continuing process without stopping..." : "Summary completed with fallback model"}
             </span>
           </div>
 
-          <div
-            style={{
-              fontSize: "12px",
-              color: "var(--text-primary)",
-              background: "rgba(255, 255, 255, 0.85)",
-              padding: "8px 12px",
-              borderRadius: "6px",
-              border: "1px solid rgba(0, 0, 0, 0.07)",
-              wordBreak: "break-word",
-            }}
-          >
-            <span style={{ color: "#dc2626", fontWeight: 600 }}>
+          <div className="auto-switch-error-box">
+            <span className="auto-switch-error-label">
               Error on {autoSwitchNotice.failedModelName}:
             </span>{" "}
-            <span style={{ fontFamily: "monospace", fontSize: "11px" }}>{autoSwitchNotice.error}</span>
+            <span className="auto-switch-error-text">{autoSwitchNotice.error}</span>
           </div>
 
-          <div style={{ display: "flex", alignItems: "center", gap: "6px", fontSize: "12px", color: "#047857", fontWeight: 600 }}>
-            <Sparkles size={15} color="#059669" />
+          <div className="auto-switch-footer">
+            <Sparkles size={15} color="#059669" style={{ flexShrink: 0 }} />
             <span>
               Automatically switched to <strong>{autoSwitchNotice.newModelName}</strong>. Summarization continues without interruption.
             </span>
@@ -933,7 +898,7 @@ export default function AutoSummary() {
       )}
 
       {error && (
-        <div className="error-message" role="alert" style={{ display: "flex", flexDirection: "column", gap: "10px", padding: "14px 16px", background: "rgba(239, 68, 68, 0.08)", border: "1px solid rgba(239, 68, 68, 0.25)", borderRadius: "8px" }}>
+        <div className="error-message" role="alert" style={{ display: "flex", flexDirection: "column", gap: "12px", padding: "18px 22px", margin: "20px 0", background: "rgba(239, 68, 68, 0.08)", border: "1px solid rgba(239, 68, 68, 0.25)", borderRadius: "14px", width: "100%", boxSizing: "border-box" }}>
           <div style={{ display: "flex", alignItems: "flex-start", gap: "10px" }}>
             <AlertCircle size={20} style={{ color: "#ef4444", flexShrink: 0, marginTop: "2px" }} />
             <div style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
@@ -1124,16 +1089,18 @@ export default function AutoSummary() {
             <div style={{
               display: "flex",
               alignItems: "center",
-              gap: "10px",
-              padding: "10px 14px",
+              gap: "12px",
+              padding: "18px 22px",
               background: "rgba(79, 70, 229, 0.08)",
               border: "1px solid rgba(79, 70, 229, 0.25)",
-              borderRadius: "8px",
+              borderRadius: "14px",
               fontSize: "13px",
               color: "var(--text-primary)",
-              marginBottom: "16px",
+              margin: "20px 0",
+              boxSizing: "border-box",
+              width: "100%",
             }}>
-              <Sparkles size={16} color="#4f46e5" />
+              <Sparkles size={18} color="#4f46e5" style={{ flexShrink: 0 }} />
               <span>
                 <strong>Automatic Failover Notice:</strong> {result.fallback_notice}
               </span>
