@@ -46,6 +46,13 @@ export const AI_MODELS = [
     badge: "Groq Cloud",
   },
   {
+    key: "groq:llama-3.1-8b-instant",
+    provider: "groq",
+    model: "llama-3.1-8b-instant",
+    label: "⚡ Groq Cloud - Llama 3.1 8B (Fast & Free)",
+    badge: "Groq Cloud",
+  },
+  {
     key: "grok:grok-2-latest",
     provider: "grok",
     model: "grok-2-latest",
@@ -67,6 +74,30 @@ export const AI_MODELS = [
     badge: "Local PC",
   },
 ];
+
+const MODEL_FAILOVER_CHAIN = [
+  "gemini:gemini-2.5-flash",
+  "gemini:gemini-2.5-flash-lite",
+  "gemini:gemini-2.0-flash",
+  "groq:llama-3.3-70b-versatile",
+  "groq:llama-3.1-8b-instant",
+  "grok:grok-2-latest",
+  "ollama:default",
+];
+
+function pickNextFallbackModel(currentKey, triedKeysSet) {
+  for (const key of MODEL_FAILOVER_CHAIN) {
+    if (key !== currentKey && !triedKeysSet.has(key)) {
+      return key;
+    }
+  }
+  for (const item of AI_MODELS) {
+    if (item.key !== currentKey && !triedKeysSet.has(item.key)) {
+      return item.key;
+    }
+  }
+  return null;
+}
 
 function formatRemainingTime(seconds) {
   const totalSeconds = Math.ceil(seconds);
@@ -143,13 +174,80 @@ export default function AutoSummary() {
   const selectedAiProvider = selectedAiModelKey.split(":")[0];
   const selectedAiModel = selectedAiModelKey.split(":")[1] || "";
 
+  const [autoSwitchNotice, setAutoSwitchNotice] = useState(null);
+  const triedModelsRef = useRef(new Set());
+  const isSwitchingModelRef = useRef(false);
+  const activeModelKeyRef = useRef(selectedAiModelKey);
+  const currentFileRef = useRef(file);
+
+  useEffect(() => {
+    activeModelKeyRef.current = selectedAiModelKey;
+  }, [selectedAiModelKey]);
+
+  useEffect(() => {
+    currentFileRef.current = file;
+  }, [file]);
+
   const handleModelChange = (modelKey) => {
     setSelectedAiModelKey(modelKey);
+    activeModelKeyRef.current = modelKey;
     const prov = modelKey.split(":")[0];
     try {
       window.localStorage.setItem("researchmate.ai_model_key", modelKey);
       window.localStorage.setItem("researchmate.ai_provider", prov);
     } catch {}
+  };
+
+  const triggerModelFailover = (failedModelKey, rawErrorMessage) => {
+    if (isSwitchingModelRef.current) return;
+    isSwitchingModelRef.current = true;
+
+    const currentKey = failedModelKey || activeModelKeyRef.current;
+    triedModelsRef.current.add(currentKey);
+
+    const nextModelKey = pickNextFallbackModel(currentKey, triedModelsRef.current);
+
+    if (!nextModelKey) {
+      isSwitchingModelRef.current = false;
+      setError(rawErrorMessage || "All available AI models failed.");
+      setStatus("error");
+      return;
+    }
+
+    const failedObj = AI_MODELS.find((m) => m.key === currentKey);
+    const nextObj = AI_MODELS.find((m) => m.key === nextModelKey);
+    const failedLabel = failedObj ? failedObj.label.replace(/^[⚡🚀💻]\s*/, "") : currentKey;
+    const nextLabel = nextObj ? nextObj.label.replace(/^[⚡🚀💻]\s*/, "") : nextModelKey;
+
+    // Record error notice banner
+    setAutoSwitchNotice({
+      error: rawErrorMessage,
+      failedModelName: failedLabel,
+      newModelName: nextLabel,
+      newModelKey: nextModelKey,
+      timestamp: Date.now(),
+    });
+
+    // Auto-update dropdown state
+    handleModelChange(nextModelKey);
+    setMessage(
+      `⚠️ ${failedLabel.split("(")[0].trim()} error. Auto-switching to ${nextLabel.split("(")[0].trim()} and continuing without stopping...`
+    );
+
+    // Cancel old controllers
+    uploadControllerRef.current?.abort();
+    progressControllerRef.current?.abort();
+    uploadControllerRef.current = null;
+    progressControllerRef.current = null;
+
+    // Continue summarizing process without stopping!
+    window.setTimeout(() => {
+      isSwitchingModelRef.current = false;
+      const targetFile = currentFileRef.current;
+      if (targetFile) {
+        void handleUpload(nextModelKey, targetFile);
+      }
+    }, 450);
   };
   const uploadControllerRef = useRef(null);
   const progressControllerRef = useRef(null);
@@ -336,10 +434,8 @@ export default function AutoSummary() {
         }
 
         if (update.status === "error") {
-          setError(update.message || "Processing failed.");
-          setStatus("error");
-          setTaskFinishedAt(update.updated_at * 1000);
           uploadControllerRef.current?.abort();
+          triggerModelFailover(activeModelKeyRef.current, update.message || "Processing failed.");
           return update;
         }
         if (update.status === "completed") {
@@ -373,8 +469,22 @@ export default function AutoSummary() {
     return null;
   }
 
-  async function handleUpload() {
-    if (!file || status === "processing") return;
+  async function handleUpload(overrideModelKey = null, overrideFile = null) {
+    const targetFile = overrideFile || file || currentFileRef.current;
+    if (!targetFile) return;
+
+    const isAutoSwitch = Boolean(overrideModelKey);
+    const activeKey = overrideModelKey || selectedAiModelKey;
+    activeModelKeyRef.current = activeKey;
+    const providerToUse = activeKey.split(":")[0];
+    const rawModelToUse = activeKey.split(":")[1] || "";
+    const modelToUse = rawModelToUse === "default" ? "" : rawModelToUse;
+
+    if (!isAutoSwitch) {
+      triedModelsRef.current.clear();
+      setAutoSwitchNotice(null);
+    }
+    triedModelsRef.current.add(activeKey);
 
     const currentTaskId = crypto.randomUUID();
     const uploadController = new AbortController();
@@ -386,15 +496,18 @@ export default function AutoSummary() {
     progressSamplesRef.current = { taskId: currentTaskId, samples: [] };
     setTaskId(currentTaskId);
     setStatus("processing");
-    setProgress(0);
-    setDisplayProgress(0);
-    setMessage("Connecting to ResearchMate...");
-    setResult(null);
-    setPartialResult(null);
+    if (!isAutoSwitch) {
+      setProgress(0);
+      setDisplayProgress(0);
+    }
+    setMessage(
+      isAutoSwitch
+        ? `Auto-switched model. Continuing analysis...`
+        : "Connecting to ResearchMate AI..."
+    );
     setError("");
     setProgressSyncIssue("");
     setLastSyncedAt(null);
-    setBackendUpdatedAt(null);
     setBackendUpdatedAt(null);
     setTaskStartedAt(null);
     setTaskFinishedAt(null);
@@ -413,7 +526,7 @@ export default function AutoSummary() {
 
     try {
       const formData = new FormData();
-      formData.append("file", file);
+      formData.append("file", targetFile);
 
       let response;
       try {
@@ -421,8 +534,8 @@ export default function AutoSummary() {
           method: "POST",
           headers: {
             "X-Task-ID": currentTaskId,
-            "X-AI-Provider": selectedAiProvider,
-            "X-AI-Model": selectedAiModel === "default" ? "" : selectedAiModel,
+            "X-AI-Provider": providerToUse,
+            "X-AI-Model": modelToUse,
           },
           body: formData,
           signal: uploadController.signal,
@@ -465,9 +578,7 @@ export default function AutoSummary() {
       progressController.abort();
     } catch (err) {
       if (!uploadController.signal.aborted) {
-        setError(err.message || "Something went wrong.");
-        setStatus("error");
-        progressController.abort();
+        triggerModelFailover(activeKey, err.message || "Something went wrong.");
       }
     } finally {
       if (uploadControllerRef.current === uploadController) {
@@ -654,11 +765,79 @@ export default function AutoSummary() {
           disabled={isProcessing}
         />
 
-        <button className="primary-button full-width" onClick={handleUpload} disabled={!file || isProcessing}>
+        <button className="primary-button full-width" onClick={() => handleUpload()} disabled={!file || isProcessing}>
           {isProcessing ? <LoaderCircle className="spin" size={17} /> : <Sparkles size={17} />}
           {isProcessing ? "Analyzing paper..." : "Generate summary"}
         </button>
       </section>
+
+      {/* Real-time AI Model Error & Auto-Switch Notification Banner */}
+      {autoSwitchNotice && (
+        <div
+          className="auto-switch-notice-banner"
+          role="status"
+          style={{
+            margin: "0 0 16px 0",
+            padding: "14px 16px",
+            background: "rgba(245, 158, 11, 0.09)",
+            border: "1px solid rgba(245, 158, 11, 0.4)",
+            borderRadius: "10px",
+            display: "flex",
+            flexDirection: "column",
+            gap: "8px",
+            boxShadow: "0 2px 8px rgba(245, 158, 11, 0.08)",
+          }}
+        >
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: "8px" }}>
+            <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+              <AlertCircle size={18} color="#d97706" style={{ flexShrink: 0 }} />
+              <strong style={{ fontSize: "13px", color: "#b45309" }}>
+                AI Model Error Detected · Auto-Switching Active
+              </strong>
+            </div>
+            <span
+              style={{
+                fontSize: "11px",
+                fontWeight: 600,
+                color: isProcessing ? "#047857" : "#4f46e5",
+                background: isProcessing ? "rgba(16, 185, 129, 0.15)" : "rgba(79, 70, 229, 0.12)",
+                padding: "3px 10px",
+                borderRadius: "12px",
+                display: "flex",
+                alignItems: "center",
+                gap: "5px",
+              }}
+            >
+              {isProcessing && <LoaderCircle className="spin" size={12} />}
+              {isProcessing ? "Continuing process without stopping..." : "Summary completed with fallback model"}
+            </span>
+          </div>
+
+          <div
+            style={{
+              fontSize: "12px",
+              color: "var(--text-primary)",
+              background: "rgba(255, 255, 255, 0.85)",
+              padding: "8px 12px",
+              borderRadius: "6px",
+              border: "1px solid rgba(0, 0, 0, 0.07)",
+              wordBreak: "break-word",
+            }}
+          >
+            <span style={{ color: "#dc2626", fontWeight: 600 }}>
+              Error on {autoSwitchNotice.failedModelName}:
+            </span>{" "}
+            <span style={{ fontFamily: "monospace", fontSize: "11px" }}>{autoSwitchNotice.error}</span>
+          </div>
+
+          <div style={{ display: "flex", alignItems: "center", gap: "6px", fontSize: "12px", color: "#047857", fontWeight: 600 }}>
+            <Sparkles size={15} color="#059669" />
+            <span>
+              Automatically switched to <strong>{autoSwitchNotice.newModelName}</strong>. Summarization continues without interruption.
+            </span>
+          </div>
+        </div>
+      )}
 
       {(isProcessing || status === "completed") && (
         <section className="panel progress-panel" aria-live="polite">

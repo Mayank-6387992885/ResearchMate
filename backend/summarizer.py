@@ -213,13 +213,11 @@ def _stream_gemini(
                         elif not is_last_model:
                             print(f"[AI] Gemini model '{model}' returned HTTP {response.status_code}; trying next candidate...", flush=True)
                             break
-                    elif response.status_code in (400, 404):
-                        if not is_last_model:
-                            print(f"[AI] Gemini model '{model}' returned HTTP {response.status_code}; trying next candidate...", flush=True)
-                            break
-
-                    if not response.ok:
+                    elif not response.ok:
                         err_detail = response.text[:300]
+                        if not is_last_model:
+                            print(f"[AI] Gemini model '{model}' returned HTTP {response.status_code} ({err_detail[:100]}); trying next candidate...", flush=True)
+                            break
                         raise RuntimeError(f"Gemini API ({model}) returned HTTP {response.status_code}: {err_detail}")
 
                     response.encoding = "utf-8"
@@ -686,6 +684,13 @@ def _cache_path(paper_text: str, provider: str | None = None, model: str | None 
     return CACHE_DIR / f"{digest}.json"
 
 
+def _paper_chunk_cache_path(paper_text: str) -> Path:
+    """Return a cache filename shared across all AI models for identical paper text."""
+    cache_key = f"shared_chunks|{CHUNK_SIZE}|{paper_text}"
+    digest = hashlib.sha256(cache_key.encode("utf-8")).hexdigest()
+    return CACHE_DIR / f"{digest}.json"
+
+
 def _save_cache(path: Path, data: dict) -> None:
     """Write cache data atomically so interrupted writes do not corrupt it."""
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -730,6 +735,7 @@ def summarize_paper(
         raise ValueError("No text chunks were created from the paper.")
 
     cache_path = _cache_path(paper_text, provider=provider, model=model)
+    shared_cache_path = _paper_chunk_cache_path(paper_text)
 
     try:
         if cache_path.exists():
@@ -738,6 +744,16 @@ def summarize_paper(
             cache = {"chunk_summaries": {}, "final_summary": None}
     except (OSError, json.JSONDecodeError):
         cache = {"chunk_summaries": {}, "final_summary": None}
+
+    # Cross-model chunk recovery: load any chunks previously finished by other models for this paper
+    try:
+        if shared_cache_path.exists():
+            shared_cache = json.loads(shared_cache_path.read_text(encoding="utf-8"))
+            for k, v in shared_cache.get("chunk_summaries", {}).items():
+                if k not in cache.get("chunk_summaries", {}):
+                    cache.setdefault("chunk_summaries", {})[k] = v
+    except (OSError, json.JSONDecodeError):
+        pass
 
     # Reuse the final result if this exact paper was already summarized.
     if cache.get("final_summary"):
@@ -810,6 +826,14 @@ PAPER SECTION:
 
                 cache.setdefault("chunk_summaries", {})[cache_key] = chunk_summary
                 _save_cache(cache_path, cache)
+                try:
+                    shared_cache = {}
+                    if shared_cache_path.exists():
+                        shared_cache = json.loads(shared_cache_path.read_text(encoding="utf-8"))
+                    shared_cache.setdefault("chunk_summaries", {})[cache_key] = chunk_summary
+                    _save_cache(shared_cache_path, shared_cache)
+                except Exception:
+                    pass
 
                 print(
                     f"[AI] Chunk {index} completed in "
