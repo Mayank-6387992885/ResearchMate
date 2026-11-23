@@ -68,8 +68,8 @@ def _stream_gemini(
     if not api_key:
         raise RuntimeError("GEMINI_API_KEY is not set.")
 
-    model = os.getenv("GEMINI_MODEL", "").strip() or "gemini-1.5-flash"
-    url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:streamGenerateContent?alt=sse&key={api_key}"
+    configured_model = os.getenv("GEMINI_MODEL", "").strip()
+    candidate_models = [configured_model] if configured_model else ["gemini-2.0-flash", "gemini-2.5-flash", "gemini-2.0-flash-lite"]
 
     generation_config: dict[str, Any] = {
         "temperature": 0.2,
@@ -83,67 +83,81 @@ def _stream_gemini(
         "generationConfig": generation_config,
     }
 
-    response_text = []
-    heartbeat_stop = threading.Event()
-    heartbeat_errors: list[Exception] = []
+    last_error: Exception | None = None
 
-    def report_heartbeat() -> None:
-        while not heartbeat_stop.wait(PROGRESS_HEARTBEAT_SECONDS):
-            try:
-                if heartbeat_callback is not None:
-                    heartbeat_callback()
-            except Exception as exc:
-                heartbeat_errors.append(exc)
-                return
+    for model in candidate_models:
+        url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:streamGenerateContent?alt=sse&key={api_key}"
+        response_text = []
+        heartbeat_stop = threading.Event()
+        heartbeat_errors: list[Exception] = []
 
-    heartbeat_thread = None
-    if heartbeat_callback is not None:
-        heartbeat_thread = threading.Thread(target=report_heartbeat, daemon=True)
-        heartbeat_thread.start()
+        def report_heartbeat() -> None:
+            while not heartbeat_stop.wait(PROGRESS_HEARTBEAT_SECONDS):
+                try:
+                    if heartbeat_callback is not None:
+                        heartbeat_callback()
+                except Exception as exc:
+                    heartbeat_errors.append(exc)
+                    return
 
-    try:
-        with requests.post(
-            url,
-            json=payload,
-            stream=True,
-            timeout=REQUEST_TIMEOUT,
-        ) as response:
-            if not response.ok:
-                err_detail = response.text[:300]
-                raise RuntimeError(f"Gemini API returned HTTP {response.status_code}: {err_detail}")
-            response.encoding = "utf-8"
-            for line in response.iter_lines(decode_unicode=True):
-                if not line:
+        heartbeat_thread = None
+        if heartbeat_callback is not None:
+            heartbeat_thread = threading.Thread(target=report_heartbeat, daemon=True)
+            heartbeat_thread.start()
+
+        try:
+            with requests.post(
+                url,
+                json=payload,
+                stream=True,
+                timeout=REQUEST_TIMEOUT,
+            ) as response:
+                if response.status_code == 404 and len(candidate_models) > 1 and model != candidate_models[-1]:
                     continue
-                if line.startswith("data: "):
-                    line_data = line[6:].strip()
-                    if not line_data:
+                if not response.ok:
+                    err_detail = response.text[:300]
+                    raise RuntimeError(f"Gemini API ({model}) returned HTTP {response.status_code}: {err_detail}")
+                response.encoding = "utf-8"
+                for line in response.iter_lines(decode_unicode=True):
+                    if not line:
                         continue
-                    try:
-                        update = json.loads(line_data)
-                    except json.JSONDecodeError:
-                        continue
-                    candidates = update.get("candidates", [])
-                    if candidates:
-                        parts = candidates[0].get("content", {}).get("parts", [])
-                        for part in parts:
-                            text = part.get("text", "")
-                            if text:
-                                response_text.append(text)
-                                if progress_callback is not None:
-                                    progress_callback("".join(response_text))
-    finally:
-        heartbeat_stop.set()
-        if heartbeat_thread is not None:
-            heartbeat_thread.join()
+                    if line.startswith("data: "):
+                        line_data = line[6:].strip()
+                        if not line_data:
+                            continue
+                        try:
+                            update = json.loads(line_data)
+                        except json.JSONDecodeError:
+                            continue
+                        candidates = update.get("candidates", [])
+                        if candidates:
+                            parts = candidates[0].get("content", {}).get("parts", [])
+                            for part in parts:
+                                text = part.get("text", "")
+                                if text:
+                                    response_text.append(text)
+                                    if progress_callback is not None:
+                                        progress_callback("".join(response_text))
+        except Exception as exc:
+            last_error = exc
+            if model != candidate_models[-1] and "404" in str(exc):
+                continue
+            raise
+        finally:
+            heartbeat_stop.set()
+            if heartbeat_thread is not None:
+                heartbeat_thread.join()
 
-    if heartbeat_errors:
-        raise heartbeat_errors[0]
+        if heartbeat_errors:
+            raise heartbeat_errors[0]
 
-    generated_text = "".join(response_text).strip()
-    if not generated_text:
-        raise RuntimeError("Gemini API returned an empty response.")
-    return generated_text
+        generated_text = "".join(response_text).strip()
+        if generated_text:
+            return generated_text
+
+    if last_error:
+        raise last_error
+    raise RuntimeError("Gemini API returned an empty response.")
 
 
 def _stream_groq(
@@ -395,7 +409,7 @@ def _cache_path(paper_text: str) -> Path:
     """Return a stable cache filename for this exact paper and configuration."""
     provider = get_active_provider()
     model = (
-        os.getenv("GEMINI_MODEL", "gemini-1.5-flash") if provider == "gemini"
+        os.getenv("GEMINI_MODEL", "gemini-2.0-flash") if provider == "gemini"
         else os.getenv("GROQ_MODEL", "llama-3.3-70b-versatile") if provider == "groq"
         else MODEL_NAME
     )
