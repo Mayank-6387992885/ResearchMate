@@ -490,7 +490,7 @@ export default function AutoSummary() {
             <AlertCircle size={18} />
             <span>{error}</span>
           </div>
-          {!isLocalApi() && (error.toLowerCase().includes("ollama") || error.toLowerCase().includes("11434")) && (
+          {!isLocalApi() && (error.toLowerCase().includes("ollama") || error.toLowerCase().includes("11434") || error.toLowerCase().includes("gemini")) && (
             <div style={{
               marginTop: "4px",
               padding: "10px 12px",
@@ -501,7 +501,10 @@ export default function AutoSummary() {
               color: "var(--text-primary)"
             }}>
               <p style={{ margin: "0 0 8px 0" }}>
-                💡 <strong>Why this happens:</strong> You are using the <strong>Cloud (Render)</strong> backend, but Ollama is running on your <strong>local computer</strong>. Remote cloud servers cannot connect to your personal PC's localhost.
+                💡 <strong>To run on Render Cloud:</strong> Add <code>GEMINI_API_KEY</code> (get a free key from <a href="https://aistudio.google.com/app/apikey" target="_blank" rel="noreferrer" style={{ color: "#4f46e5", textDecoration: "underline" }}>Google AI Studio</a>) or <code>GROQ_API_KEY</code> to your Render Dashboard under Environment Variables.
+              </p>
+              <p style={{ margin: "0 0 10px 0" }}>
+                Alternatively, switch to your local backend to summarize using your PC's local Ollama:
               </p>
               <button
                 type="button"
