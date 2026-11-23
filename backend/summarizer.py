@@ -55,6 +55,58 @@ def call_ollama(prompt: str, max_tokens: int = 200) -> str:
     return stream_ollama(prompt, max_tokens, json_format=False)
 
 
+_cached_gemini_models: list[str] = []
+
+
+def _resolve_gemini_models(api_key: str) -> list[str]:
+    """Retrieve and prioritize available Gemini models dynamically for this key."""
+    global _cached_gemini_models
+    if _cached_gemini_models:
+        return _cached_gemini_models
+
+    configured = os.getenv("GEMINI_MODEL", "").strip()
+    if configured:
+        _cached_gemini_models = [configured]
+        return _cached_gemini_models
+
+    defaults = [
+        "gemini-2.5-flash-lite",
+        "gemini-2.5-flash",
+        "gemini-2.0-flash",
+    ]
+
+    try:
+        res = requests.get(
+            f"https://generativelanguage.googleapis.com/v1beta/models?key={api_key}",
+            timeout=5,
+        )
+        if res.ok:
+            data = res.json()
+            available = [
+                m["name"].replace("models/", "")
+                for m in data.get("models", [])
+                if "generateContent" in m.get("supportedGenerationMethods", [])
+            ]
+            flash_models = [m for m in available if "flash" in m.lower()]
+            if flash_models:
+                prioritized = sorted(
+                    flash_models,
+                    key=lambda x: ("2.5" in x, "lite" in x, "2.0" in x, x),
+                    reverse=True,
+                )
+                _cached_gemini_models = prioritized
+                print(f"[AI] Discovered available Gemini models: {prioritized[:3]}", flush=True)
+                return prioritized
+            if available:
+                _cached_gemini_models = available
+                return available
+    except Exception as exc:
+        print(f"[AI] Note: could not query Gemini models list ({exc}); using defaults.", flush=True)
+
+    _cached_gemini_models = defaults
+    return defaults
+
+
 def _stream_gemini(
     prompt: str,
     max_tokens: int = 200,
@@ -68,8 +120,7 @@ def _stream_gemini(
     if not api_key:
         raise RuntimeError("GEMINI_API_KEY is not set.")
 
-    configured_model = os.getenv("GEMINI_MODEL", "").strip()
-    candidate_models = [configured_model] if configured_model else ["gemini-2.0-flash", "gemini-2.5-flash", "gemini-2.0-flash-lite"]
+    candidate_models = _resolve_gemini_models(api_key)
 
     generation_config: dict[str, Any] = {
         "temperature": 0.2,
@@ -409,7 +460,7 @@ def _cache_path(paper_text: str) -> Path:
     """Return a stable cache filename for this exact paper and configuration."""
     provider = get_active_provider()
     model = (
-        os.getenv("GEMINI_MODEL", "gemini-2.0-flash") if provider == "gemini"
+        os.getenv("GEMINI_MODEL", "gemini-2.5-flash-lite") if provider == "gemini"
         else os.getenv("GROQ_MODEL", "llama-3.3-70b-versatile") if provider == "groq"
         else MODEL_NAME
     )
