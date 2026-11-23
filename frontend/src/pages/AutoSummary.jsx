@@ -73,9 +73,43 @@ export default function AutoSummary() {
   const [taskFinishedAt, setTaskFinishedAt] = useState(null);
   const [backendUpdatedAt, setBackendUpdatedAt] = useState(null);
   const [clockNow, setClockNow] = useState(Date.now());
+  const [selectedAiProvider, setSelectedAiProvider] = useState(() => {
+    try {
+      return window.localStorage.getItem("researchmate.ai_provider") || (isLocalApi() ? "ollama" : "gemini");
+    } catch {
+      return isLocalApi() ? "ollama" : "gemini";
+    }
+  });
+
+  const handleSelectAiProvider = (provider) => {
+    setSelectedAiProvider(provider);
+    try {
+      window.localStorage.setItem("researchmate.ai_provider", provider);
+    } catch {}
+  };
   const uploadControllerRef = useRef(null);
   const progressControllerRef = useRef(null);
   const progressSamplesRef = useRef({ taskId: "", samples: [] });
+
+  useEffect(() => {
+    let active = true;
+    apiFetch(API.authConfig)
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data) => {
+        if (active && data) {
+          try {
+            const saved = window.localStorage.getItem("researchmate.ai_provider");
+            if (!saved && data.ai_provider) {
+              setSelectedAiProvider(data.ai_provider);
+            }
+          } catch {}
+        }
+      })
+      .catch(() => {});
+    return () => {
+      active = false;
+    };
+  }, []);
 
   useEffect(() => {
     const clock = window.setInterval(() => setClockNow(Date.now()), 1000);
@@ -265,7 +299,10 @@ export default function AutoSummary() {
       try {
         response = await apiFetch(API.upload, {
           method: "POST",
-          headers: { "X-Task-ID": currentTaskId },
+          headers: {
+            "X-Task-ID": currentTaskId,
+            "X-AI-Provider": selectedAiProvider,
+          },
           body: formData,
           signal: uploadController.signal,
         });
@@ -362,6 +399,71 @@ export default function AutoSummary() {
             <p className="muted">Choose a PDF file up to 10 MB.</p>
           </div>
           <Sparkles className="heading-sparkle" />
+        </div>
+
+        <div
+          className="ai-provider-selector-card"
+          style={{
+            margin: "0 0 16px 0",
+            padding: "10px 14px",
+            background: "var(--bg-subtle, rgba(0, 0, 0, 0.02))",
+            border: "1px solid var(--border-color, rgba(0, 0, 0, 0.08))",
+            borderRadius: "10px",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "space-between",
+            flexWrap: "wrap",
+            gap: "10px",
+          }}
+        >
+          <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+            <Sparkles size={16} color="var(--primary, #4f46e5)" />
+            <div>
+              <span style={{ fontSize: "13px", fontWeight: 600, color: "var(--text-primary)" }}>
+                AI Provider:
+              </span>
+              <span style={{ fontSize: "12px", color: "var(--text-secondary, #64748b)", marginLeft: "6px" }}>
+                {selectedAiProvider === "gemini" && "Google Gemini Cloud"}
+                {selectedAiProvider === "grok" && "xAI Grok / Groq Cloud"}
+                {selectedAiProvider === "ollama" && "Local Ollama (localhost:11434)"}
+              </span>
+            </div>
+          </div>
+
+          <div style={{ display: "flex", gap: "6px", flexWrap: "wrap" }}>
+            {[
+              { id: "gemini", label: "⚡ Gemini", desc: "Google Gemini Cloud API" },
+              { id: "grok", label: "🚀 Grok", desc: "xAI Grok / Groq Cloud API" },
+              { id: "ollama", label: "💻 Local", desc: "Ollama running on localhost:11434" },
+            ].map((p) => {
+              const active = selectedAiProvider === p.id;
+              return (
+                <button
+                  key={p.id}
+                  type="button"
+                  title={p.desc}
+                  disabled={isProcessing}
+                  onClick={() => handleSelectAiProvider(p.id)}
+                  style={{
+                    padding: "5px 14px",
+                    borderRadius: "20px",
+                    fontSize: "12px",
+                    fontWeight: active ? 600 : 500,
+                    cursor: isProcessing ? "not-allowed" : "pointer",
+                    border: active
+                      ? "1px solid #4f46e5"
+                      : "1px solid var(--border-color, rgba(0, 0, 0, 0.12))",
+                    background: active ? "#4f46e5" : "transparent",
+                    color: active ? "#ffffff" : "var(--text-primary)",
+                    transition: "all 0.15s ease",
+                    boxShadow: active ? "0 2px 6px rgba(79, 70, 229, 0.25)" : "none",
+                  }}
+                >
+                  {p.label}
+                </button>
+              );
+            })}
+          </div>
         </div>
 
         <FileUpload
@@ -490,7 +592,75 @@ export default function AutoSummary() {
             <AlertCircle size={18} />
             <span>{error}</span>
           </div>
-          {!isLocalApi() && (error.toLowerCase().includes("ollama") || error.toLowerCase().includes("11434") || error.toLowerCase().includes("gemini")) && (
+
+          {/* Quick AI Provider Switchers on error */}
+          <div style={{ display: "flex", gap: "8px", flexWrap: "wrap", marginTop: "4px" }}>
+            {selectedAiProvider !== "gemini" && (
+              <button
+                type="button"
+                style={{
+                  padding: "5px 12px",
+                  background: "#4f46e5",
+                  color: "#fff",
+                  borderRadius: "6px",
+                  border: "none",
+                  fontSize: "12px",
+                  fontWeight: 600,
+                  cursor: "pointer",
+                }}
+                onClick={() => {
+                  handleSelectAiProvider("gemini");
+                  setError("");
+                }}
+              >
+                Switch to ⚡ Gemini
+              </button>
+            )}
+            {selectedAiProvider !== "grok" && (
+              <button
+                type="button"
+                style={{
+                  padding: "5px 12px",
+                  background: "#4f46e5",
+                  color: "#fff",
+                  borderRadius: "6px",
+                  border: "none",
+                  fontSize: "12px",
+                  fontWeight: 600,
+                  cursor: "pointer",
+                }}
+                onClick={() => {
+                  handleSelectAiProvider("grok");
+                  setError("");
+                }}
+              >
+                Switch to 🚀 Grok
+              </button>
+            )}
+            {selectedAiProvider !== "ollama" && (
+              <button
+                type="button"
+                style={{
+                  padding: "5px 12px",
+                  background: "transparent",
+                  color: "var(--text-primary)",
+                  borderRadius: "6px",
+                  border: "1px solid var(--border-color, rgba(0,0,0,0.2))",
+                  fontSize: "12px",
+                  fontWeight: 500,
+                  cursor: "pointer",
+                }}
+                onClick={() => {
+                  handleSelectAiProvider("ollama");
+                  setError("");
+                }}
+              >
+                Switch to 💻 Local Ollama
+              </button>
+            )}
+          </div>
+
+          {!isLocalApi() && (error.toLowerCase().includes("ollama") || error.toLowerCase().includes("11434") || error.toLowerCase().includes("gemini") || error.toLowerCase().includes("grok")) && (
             <div style={{
               marginTop: "4px",
               padding: "10px 12px",
@@ -501,7 +671,7 @@ export default function AutoSummary() {
               color: "var(--text-primary)"
             }}>
               <p style={{ margin: "0 0 8px 0" }}>
-                💡 <strong>To run on Render Cloud:</strong> Add <code>GEMINI_API_KEY</code> (get a free key from <a href="https://aistudio.google.com/app/apikey" target="_blank" rel="noreferrer" style={{ color: "#4f46e5", textDecoration: "underline" }}>Google AI Studio</a>) or <code>GROQ_API_KEY</code> to your Render Dashboard under Environment Variables.
+                💡 <strong>To run on Render Cloud:</strong> Add <code>GEMINI_API_KEY</code> (free from <a href="https://aistudio.google.com/app/apikey" target="_blank" rel="noreferrer" style={{ color: "#4f46e5", textDecoration: "underline" }}>Google AI Studio</a>), <code>XAI_API_KEY</code> (from <a href="https://console.x.ai" target="_blank" rel="noreferrer" style={{ color: "#4f46e5", textDecoration: "underline" }}>xAI Console</a>), or <code>GROQ_API_KEY</code> to your Render Dashboard under Environment Variables.
               </p>
               <p style={{ margin: "0 0 10px 0" }}>
                 Alternatively, switch to your local backend to summarize using your PC's local Ollama:

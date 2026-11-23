@@ -211,6 +211,7 @@ def classify_research_paper(
     paper_text: str,
     summary: str,
     progress_callback: Callable[[int, int, str], None] | None = None,
+    provider: str | None = None,
 ) -> dict[str, list[str]]:
     compact_text = paper_text[:300]
     compact_summary = summary[:800]
@@ -264,6 +265,7 @@ EXISTING PAPER SUMMARY:
             prompt,
             max_tokens=900,
             progress_callback=report_stream_progress,
+            provider=provider,
         )
     except requests.exceptions.RequestException as exc:
         raise RuntimeError(

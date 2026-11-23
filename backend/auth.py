@@ -748,8 +748,14 @@ def auth_config(db: Session = Depends(get_db)):
             and os.getenv("TWILIO_AUTH_TOKEN", "").strip()
             and os.getenv("TWILIO_VERIFY_SERVICE_SID", "").strip()
         ),
-        "ai_provider": os.getenv("AI_PROVIDER", "").strip().lower() or ("gemini" if os.getenv("GEMINI_API_KEY") else "groq" if os.getenv("GROQ_API_KEY") else "ollama"),
-        "cloud_ai_configured": bool(os.getenv("GEMINI_API_KEY") or os.getenv("GROQ_API_KEY")),
+        "ai_provider": os.getenv("AI_PROVIDER", "").strip().lower() or ("gemini" if os.getenv("GEMINI_API_KEY") else "grok" if (os.getenv("XAI_API_KEY") or os.getenv("GROK_API_KEY")) else "groq" if os.getenv("GROQ_API_KEY") else "ollama"),
+        "cloud_ai_configured": bool(os.getenv("GEMINI_API_KEY") or os.getenv("XAI_API_KEY") or os.getenv("GROK_API_KEY") or os.getenv("GROQ_API_KEY")),
+        "available_ai_providers": {
+            "gemini": bool(os.getenv("GEMINI_API_KEY")),
+            "grok": bool(os.getenv("XAI_API_KEY") or os.getenv("GROK_API_KEY")),
+            "groq": bool(os.getenv("GROQ_API_KEY")),
+            "ollama": True,
+        },
     }
 
 

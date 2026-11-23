@@ -21,20 +21,29 @@ CACHE_DIR = Path(tempfile.gettempdir()) / "researchmate_summary_cache"
 ProgressCallback = Callable[[int, str, dict[str, Any] | None], None] | None
 
 
-def get_active_provider() -> str:
-    """Determine the active AI provider: 'gemini', 'groq', or 'ollama'.
+def get_active_provider(override: str | None = None) -> str:
+    """Determine the active AI provider: 'gemini', 'grok', 'groq', or 'ollama'.
     
     Priority:
-    1. AI_PROVIDER env var (explicit override: 'gemini', 'groq', 'ollama')
-    2. GEMINI_API_KEY (Google Gemini free cloud API, ideal for Render)
-    3. GROQ_API_KEY (Groq cloud API)
-    4. Default: 'ollama' (local offline AI)
+    1. Explicit override passed from request (e.g. X-AI-Provider header)
+    2. AI_PROVIDER env var ('gemini', 'grok', 'groq', 'ollama', 'local')
+    3. If GEMINI_API_KEY is present -> 'gemini'
+    4. If XAI_API_KEY or GROK_API_KEY is present -> 'grok'
+    5. If GROQ_API_KEY is present -> 'groq'
+    6. Default fallback -> 'ollama' (local offline AI)
     """
+    if override:
+        cand = override.strip().lower()
+        if cand in ("gemini", "grok", "groq", "ollama", "local"):
+            return "ollama" if cand == "local" else cand
+
     forced = os.getenv("AI_PROVIDER", "").strip().lower()
-    if forced in ("gemini", "groq", "ollama"):
-        return forced
+    if forced in ("gemini", "grok", "groq", "ollama", "local"):
+        return "ollama" if forced == "local" else forced
     if os.getenv("GEMINI_API_KEY", "").strip():
         return "gemini"
+    if os.getenv("XAI_API_KEY", "").strip() or os.getenv("GROK_API_KEY", "").strip():
+        return "grok"
     if os.getenv("GROQ_API_KEY", "").strip():
         return "groq"
     return "ollama"
@@ -65,15 +74,16 @@ def _resolve_gemini_models(api_key: str) -> list[str]:
         return _cached_gemini_models
 
     configured = os.getenv("GEMINI_MODEL", "").strip()
-    if configured:
-        _cached_gemini_models = [configured]
-        return _cached_gemini_models
-
     defaults = [
         "gemini-2.5-flash",
         "gemini-2.5-flash-lite",
         "gemini-2.0-flash",
+        "gemini-flash-latest",
     ]
+    if configured:
+        fallbacks = [m for m in defaults if m != configured]
+        _cached_gemini_models = [configured, *fallbacks]
+        return _cached_gemini_models
 
     try:
         res = requests.get(
@@ -146,80 +156,201 @@ def _stream_gemini(
 
     last_error: Exception | None = None
 
-    for model in candidate_models:
+    for model_idx, model in enumerate(candidate_models):
+        is_last_model = (model_idx == len(candidate_models) - 1)
         url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:streamGenerateContent?alt=sse&key={api_key}"
-        response_text = []
-        heartbeat_stop = threading.Event()
-        heartbeat_errors: list[Exception] = []
 
-        def report_heartbeat() -> None:
-            while not heartbeat_stop.wait(PROGRESS_HEARTBEAT_SECONDS):
-                try:
-                    if heartbeat_callback is not None:
-                        heartbeat_callback()
-                except Exception as exc:
-                    heartbeat_errors.append(exc)
-                    return
+        for attempt in range(2):
+            response_text = []
+            heartbeat_stop = threading.Event()
+            heartbeat_errors: list[Exception] = []
 
-        heartbeat_thread = None
-        if heartbeat_callback is not None:
-            heartbeat_thread = threading.Thread(target=report_heartbeat, daemon=True)
-            heartbeat_thread.start()
+            def report_heartbeat() -> None:
+                while not heartbeat_stop.wait(PROGRESS_HEARTBEAT_SECONDS):
+                    try:
+                        if heartbeat_callback is not None:
+                            heartbeat_callback()
+                    except Exception as exc:
+                        heartbeat_errors.append(exc)
+                        return
 
-        try:
-            with requests.post(
-                url,
-                json=payload,
-                stream=True,
-                timeout=REQUEST_TIMEOUT,
-            ) as response:
-                if response.status_code in (400, 404) and len(candidate_models) > 1 and model != candidate_models[-1]:
-                    print(f"[AI] Gemini model '{model}' returned HTTP {response.status_code}; trying next candidate...", flush=True)
+            heartbeat_thread = None
+            if heartbeat_callback is not None:
+                heartbeat_thread = threading.Thread(target=report_heartbeat, daemon=True)
+                heartbeat_thread.start()
+
+            retry_same = False
+            try:
+                with requests.post(
+                    url,
+                    json=payload,
+                    stream=True,
+                    timeout=REQUEST_TIMEOUT,
+                ) as response:
+                    if response.status_code in (429, 503):
+                        if attempt == 0:
+                            print(f"[AI] Gemini model '{model}' returned HTTP {response.status_code} (high demand); waiting 2s to retry...", flush=True)
+                            time.sleep(2.0)
+                            retry_same = True
+                            continue
+                        elif not is_last_model:
+                            print(f"[AI] Gemini model '{model}' returned HTTP {response.status_code}; trying next candidate...", flush=True)
+                            break
+                    elif response.status_code in (400, 404):
+                        if not is_last_model:
+                            print(f"[AI] Gemini model '{model}' returned HTTP {response.status_code}; trying next candidate...", flush=True)
+                            break
+
+                    if not response.ok:
+                        err_detail = response.text[:300]
+                        raise RuntimeError(f"Gemini API ({model}) returned HTTP {response.status_code}: {err_detail}")
+
+                    response.encoding = "utf-8"
+                    for line in response.iter_lines(decode_unicode=True):
+                        if not line:
+                            continue
+                        if line.startswith("data: "):
+                            line_data = line[6:].strip()
+                            if not line_data:
+                                continue
+                            try:
+                                update = json.loads(line_data)
+                            except json.JSONDecodeError:
+                                continue
+                            candidates = update.get("candidates", [])
+                            if candidates:
+                                parts = candidates[0].get("content", {}).get("parts", [])
+                                for part in parts:
+                                    text = part.get("text", "")
+                                    if text:
+                                        response_text.append(text)
+                                        if progress_callback is not None:
+                                            progress_callback("".join(response_text))
+            except Exception as exc:
+                last_error = exc
+                if retry_same:
                     continue
-                if not response.ok:
-                    err_detail = response.text[:300]
-                    raise RuntimeError(f"Gemini API ({model}) returned HTTP {response.status_code}: {err_detail}")
-                response.encoding = "utf-8"
-                for line in response.iter_lines(decode_unicode=True):
-                    if not line:
-                        continue
-                    if line.startswith("data: "):
-                        line_data = line[6:].strip()
-                        if not line_data:
-                            continue
-                        try:
-                            update = json.loads(line_data)
-                        except json.JSONDecodeError:
-                            continue
-                        candidates = update.get("candidates", [])
-                        if candidates:
-                            parts = candidates[0].get("content", {}).get("parts", [])
-                            for part in parts:
-                                text = part.get("text", "")
-                                if text:
-                                    response_text.append(text)
-                                    if progress_callback is not None:
-                                        progress_callback("".join(response_text))
-        except Exception as exc:
-            last_error = exc
-            if model != candidate_models[-1] and ("404" in str(exc) or "400" in str(exc)):
-                continue
-            raise
-        finally:
-            heartbeat_stop.set()
-            if heartbeat_thread is not None:
-                heartbeat_thread.join()
+                if not is_last_model and any(code in str(exc) for code in ("404", "400", "429", "503")):
+                    time.sleep(1.0)
+                    break
+                raise
+            finally:
+                heartbeat_stop.set()
+                if heartbeat_thread is not None:
+                    heartbeat_thread.join()
 
-        if heartbeat_errors:
-            raise heartbeat_errors[0]
+            if heartbeat_errors:
+                raise heartbeat_errors[0]
 
-        generated_text = "".join(response_text).strip()
-        if generated_text:
-            return generated_text
+            generated_text = "".join(response_text).strip()
+            if generated_text:
+                return generated_text
 
     if last_error:
         raise last_error
     raise RuntimeError("Gemini API returned an empty response.")
+
+
+def _stream_grok(
+    prompt: str,
+    max_tokens: int = 200,
+    progress_callback: Callable[[str], None] | None = None,
+    *,
+    json_format: bool = False,
+    heartbeat_callback: Callable[[], None] | None = None,
+) -> str:
+    """Generate response via xAI Grok REST API (OpenAI-compatible streaming)."""
+    api_key = os.getenv("XAI_API_KEY", "").strip() or os.getenv("GROK_API_KEY", "").strip()
+    if not api_key:
+        if os.getenv("GROQ_API_KEY", "").strip():
+            return _stream_groq(
+                prompt,
+                max_tokens=max_tokens,
+                progress_callback=progress_callback,
+                json_format=json_format,
+                heartbeat_callback=heartbeat_callback,
+            )
+        raise RuntimeError("Neither XAI_API_KEY nor GROK_API_KEY is configured in your environment.")
+
+    model = os.getenv("GROK_MODEL", "").strip() or "grok-2-latest"
+    url = "https://api.x.ai/v1/chat/completions"
+
+    payload: dict[str, Any] = {
+        "model": model,
+        "messages": [{"role": "user", "content": prompt}],
+        "temperature": 0.2,
+        "max_tokens": max_tokens,
+        "stream": True,
+    }
+    if json_format:
+        payload["response_format"] = {"type": "json_object"}
+
+    headers = {
+        "Authorization": f"Bearer {api_key}",
+        "Content-Type": "application/json",
+    }
+
+    response_text = []
+    heartbeat_stop = threading.Event()
+    heartbeat_errors: list[Exception] = []
+
+    def report_heartbeat() -> None:
+        while not heartbeat_stop.wait(PROGRESS_HEARTBEAT_SECONDS):
+            try:
+                if heartbeat_callback is not None:
+                    heartbeat_callback()
+            except Exception as exc:
+                heartbeat_errors.append(exc)
+                return
+
+    heartbeat_thread = None
+    if heartbeat_callback is not None:
+        heartbeat_thread = threading.Thread(target=report_heartbeat, daemon=True)
+        heartbeat_thread.start()
+
+    try:
+        with requests.post(
+            url,
+            json=payload,
+            headers=headers,
+            stream=True,
+            timeout=REQUEST_TIMEOUT,
+        ) as response:
+            if not response.ok:
+                err_detail = response.text[:300]
+                raise RuntimeError(f"Grok API returned HTTP {response.status_code}: {err_detail}")
+            response.encoding = "utf-8"
+            for line in response.iter_lines(decode_unicode=True):
+                if not line:
+                    continue
+                if line.startswith("data: "):
+                    line_data = line[6:].strip()
+                    if line_data == "[DONE]":
+                        break
+                    try:
+                        update = json.loads(line_data)
+                    except json.JSONDecodeError:
+                        continue
+                    choices = update.get("choices", [])
+                    if choices:
+                        delta = choices[0].get("delta", {})
+                        text = delta.get("content", "")
+                        if text:
+                            response_text.append(text)
+                            if progress_callback is not None:
+                                progress_callback("".join(response_text))
+    finally:
+        heartbeat_stop.set()
+        if heartbeat_thread is not None:
+            heartbeat_thread.join()
+
+    if heartbeat_errors:
+        raise heartbeat_errors[0]
+
+    generated_text = "".join(response_text).strip()
+    if not generated_text:
+        raise RuntimeError("Grok API returned an empty response.")
+    return generated_text
 
 
 def _stream_groq(
@@ -402,11 +533,12 @@ def stream_ollama(
     *,
     json_format: bool = True,
     heartbeat_callback: Callable[[], None] | None = None,
+    provider: str | None = None,
 ) -> str:
-    """Dispatches generation to active AI provider (Gemini, Groq, or Ollama fallback)."""
-    provider = get_active_provider()
+    """Dispatches generation to active AI provider (Gemini, Grok, Groq, or Ollama fallback)."""
+    active_provider = get_active_provider(provider)
 
-    if provider == "gemini":
+    if active_provider == "gemini":
         try:
             return _stream_gemini(
                 prompt,
@@ -416,6 +548,25 @@ def stream_ollama(
                 heartbeat_callback=heartbeat_callback,
             )
         except Exception as exc:
+            # If Grok / Groq is configured, fail over automatically
+            if os.getenv("XAI_API_KEY") or os.getenv("GROK_API_KEY"):
+                print(f"[AI] Gemini call failed ({exc}); falling back to Grok.", flush=True)
+                return _stream_grok(
+                    prompt,
+                    max_tokens=max_tokens,
+                    progress_callback=progress_callback,
+                    json_format=json_format,
+                    heartbeat_callback=heartbeat_callback,
+                )
+            if os.getenv("GROQ_API_KEY"):
+                print(f"[AI] Gemini call failed ({exc}); falling back to Groq.", flush=True)
+                return _stream_groq(
+                    prompt,
+                    max_tokens=max_tokens,
+                    progress_callback=progress_callback,
+                    json_format=json_format,
+                    heartbeat_callback=heartbeat_callback,
+                )
             # Fall back to local Ollama if running on a machine with responsive Ollama
             if _is_local_ollama_available():
                 print(f"[AI] Gemini call failed ({exc}); falling back to local Ollama.", flush=True)
@@ -428,7 +579,28 @@ def stream_ollama(
                 )
             raise
 
-    if provider == "groq":
+    if active_provider == "grok":
+        try:
+            return _stream_grok(
+                prompt,
+                max_tokens=max_tokens,
+                progress_callback=progress_callback,
+                json_format=json_format,
+                heartbeat_callback=heartbeat_callback,
+            )
+        except Exception as exc:
+            if _is_local_ollama_available():
+                print(f"[AI] Grok call failed ({exc}); falling back to local Ollama.", flush=True)
+                return _stream_ollama(
+                    prompt,
+                    max_tokens=max_tokens,
+                    progress_callback=progress_callback,
+                    json_format=json_format,
+                    heartbeat_callback=heartbeat_callback,
+                )
+            raise
+
+    if active_provider == "groq":
         try:
             return _stream_groq(
                 prompt,
@@ -467,15 +639,16 @@ def split_text(text: str, chunk_size: int = CHUNK_SIZE) -> list[str]:
     return [text[i:i + chunk_size] for i in range(0, len(text), chunk_size)]
 
 
-def _cache_path(paper_text: str) -> Path:
+def _cache_path(paper_text: str, provider: str | None = None) -> Path:
     """Return a stable cache filename for this exact paper and configuration."""
-    provider = get_active_provider()
+    active = get_active_provider(provider)
     model = (
-        os.getenv("GEMINI_MODEL", "gemini-2.5-flash") if provider == "gemini"
-        else os.getenv("GROQ_MODEL", "llama-3.3-70b-versatile") if provider == "groq"
+        os.getenv("GEMINI_MODEL", "gemini-2.5-flash") if active == "gemini"
+        else os.getenv("GROK_MODEL", "grok-2-latest") if active == "grok"
+        else os.getenv("GROQ_MODEL", "llama-3.3-70b-versatile") if active == "groq"
         else MODEL_NAME
     )
-    cache_key = f"{provider}|{model}|{CHUNK_SIZE}|{paper_text}"
+    cache_key = f"{active}|{model}|{CHUNK_SIZE}|{paper_text}"
     digest = hashlib.sha256(cache_key.encode("utf-8")).hexdigest()
     return CACHE_DIR / f"{digest}.json"
 
@@ -494,6 +667,7 @@ def _save_cache(path: Path, data: dict) -> None:
 def summarize_paper(
     paper_text: str,
     progress_callback: ProgressCallback = None,
+    provider: str | None = None,
 ) -> str:
     """Summarize a paper and resume completed chunks from the local cache.
 
@@ -521,7 +695,7 @@ def summarize_paper(
     if not chunks:
         raise ValueError("No text chunks were created from the paper.")
 
-    cache_path = _cache_path(paper_text)
+    cache_path = _cache_path(paper_text, provider=provider)
 
     try:
         if cache_path.exists():
@@ -595,6 +769,7 @@ PAPER SECTION:
                     max_tokens=200,
                     json_format=False,
                     heartbeat_callback=report_chunk_heartbeat,
+                    provider=provider,
                 )
                 chunk_summaries.append(chunk_summary)
 
@@ -671,6 +846,7 @@ Write one clear, well-organized final summary.
             max_tokens=700,
             json_format=False,
             heartbeat_callback=report_final_heartbeat,
+            provider=provider,
         )
 
         cache["final_summary"] = final_summary
@@ -684,12 +860,16 @@ Write one clear, well-organized final summary.
         return final_summary
 
     except requests.exceptions.ConnectionError as exc:
-        provider = get_active_provider()
-        if provider == "gemini":
+        active = get_active_provider(provider)
+        if active == "gemini":
             raise RuntimeError(
                 "Could not connect to Google Gemini API. Please check internet connection or GEMINI_API_KEY."
             ) from exc
-        if provider == "groq":
+        if active == "grok":
+            raise RuntimeError(
+                "Could not connect to xAI Grok API. Please check internet connection or XAI_API_KEY / GROK_API_KEY."
+            ) from exc
+        if active == "groq":
             raise RuntimeError(
                 "Could not connect to Groq API. Please check internet connection or GROQ_API_KEY."
             ) from exc
@@ -701,23 +881,23 @@ Write one clear, well-organized final summary.
         if is_cloud:
             raise RuntimeError(
                 "Cannot connect to Ollama from Cloud (Render). Ollama runs on your local computer at localhost:11434. "
-                "To enable cloud summarization on Render, add GEMINI_API_KEY (free from Google AI Studio at aistudio.google.com) "
-                "or GROQ_API_KEY in your Render Dashboard -> Environment Variables. "
+                "To enable cloud summarization on Render, add GEMINI_API_KEY (free from Google AI Studio at aistudio.google.com), "
+                "XAI_API_KEY, or GROQ_API_KEY in your Render Dashboard -> Environment Variables. "
                 "Or switch your frontend target to 'Use Local' to use your local Ollama."
             ) from exc
         raise RuntimeError(
             "Cannot connect to Ollama. Ensure Ollama is running at localhost:11434, "
-            "or set GEMINI_API_KEY in backend/.env to use Google Gemini."
+            "or configure an AI key (GEMINI_API_KEY / XAI_API_KEY / GROQ_API_KEY) in backend/.env."
         ) from exc
 
     except requests.exceptions.Timeout as exc:
-        provider = get_active_provider()
-        ai_name = "Gemini" if provider == "gemini" else "Groq" if provider == "groq" else "Ollama"
+        active = get_active_provider(provider)
+        ai_name = "Gemini" if active == "gemini" else "Grok" if active == "grok" else "Groq" if active == "groq" else "Ollama"
         raise RuntimeError(
             f"{ai_name} timed out. Completed chunks were saved; retry the same PDF to resume."
         ) from exc
 
     except requests.exceptions.RequestException as exc:
-        provider = get_active_provider()
-        ai_name = "Gemini" if provider == "gemini" else "Groq" if provider == "groq" else "Ollama"
+        active = get_active_provider(provider)
+        ai_name = "Gemini" if active == "gemini" else "Grok" if active == "grok" else "Groq" if active == "groq" else "Ollama"
         raise RuntimeError(f"{ai_name} request failed: {exc}") from exc

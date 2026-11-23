@@ -314,6 +314,7 @@ def get_progress(task_id: str, user: User = Depends(get_current_user)):
 async def upload_paper(
     file: UploadFile = File(...),
     x_task_id: str | None = Header(default=None, alias="X-Task-ID"),
+    x_ai_provider: str | None = Header(default=None, alias="X-AI-Provider"),
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
@@ -373,6 +374,7 @@ async def upload_paper(
             summarize_paper,
             text,
             report_progress,
+            x_ai_provider,
         )
 
         paper = getattr(paper_service, "create_paper")(
@@ -412,6 +414,7 @@ async def upload_paper(
                 text,
                 summary,
                 report_classification_progress,
+                x_ai_provider,
             )
         except RuntimeError as exc:
             classification_error = str(exc)
