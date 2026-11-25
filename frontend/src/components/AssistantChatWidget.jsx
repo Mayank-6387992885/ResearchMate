@@ -1,7 +1,27 @@
 import { useState } from "react";
-import { MessageCircle, X, Send, LoaderCircle, Sparkles, AlertCircle } from "lucide-react";
+import { X, Send, LoaderCircle, AlertCircle } from "lucide-react";
 import { API, apiFetch } from "../services/api";
 import MathText from "./MathText";
+
+function RobotIcon({ size = 28 }) {
+  return (
+    <svg
+      width={size}
+      height={size}
+      viewBox="0 0 36 36"
+      fill="none"
+      xmlns="http://www.w3.org/2000/svg"
+      aria-hidden="true"
+    >
+      <line x1="18" y1="3" x2="18" y2="8" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" />
+      <circle cx="18" cy="3" r="2" fill="currentColor" />
+      <rect x="6" y="8" width="24" height="20" rx="6" fill="currentColor" fillOpacity="0.16" stroke="currentColor" strokeWidth="2.2" />
+      <circle className="robot-eye" cx="13" cy="17" r="2.3" fill="currentColor" />
+      <circle className="robot-eye" cx="23" cy="17" r="2.3" fill="currentColor" />
+      <path d="M13 23h10" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" />
+    </svg>
+  );
+}
 
 const INITIAL_GREETING = {
   role: "assistant",
@@ -95,7 +115,7 @@ export default function AssistantChatWidget() {
             }}
           >
             <div style={{ display: "flex", alignItems: "center", gap: "8px", fontWeight: 600 }}>
-              <Sparkles size={16} />
+              <RobotIcon size={20} />
               <span>ResearchMate Assistant</span>
             </div>
             <button
@@ -228,9 +248,10 @@ export default function AssistantChatWidget() {
           type="button"
           onClick={() => setIsOpen(true)}
           aria-label="Open ResearchMate Assistant"
+          className="assistant-robot-btn"
           style={{
-            width: "52px",
-            height: "52px",
+            width: "56px",
+            height: "56px",
             borderRadius: "50%",
             border: "none",
             background: "var(--accent-primary, #2563eb)",
@@ -240,9 +261,24 @@ export default function AssistantChatWidget() {
             display: "flex",
             alignItems: "center",
             justifyContent: "center",
+            animation: "assistantFloat 3s ease-in-out infinite",
           }}
         >
-          <MessageCircle size={24} />
+          <style>{`
+            @keyframes assistantFloat {
+              0%, 100% { transform: translateY(0px); }
+              50% { transform: translateY(-5px); }
+            }
+            @keyframes robotBlink {
+              0%, 92%, 100% { transform: scaleY(1); }
+              96% { transform: scaleY(0.15); }
+            }
+            .assistant-robot-btn .robot-eye {
+              transform-origin: center;
+              animation: robotBlink 4s infinite;
+            }
+          `}</style>
+          <RobotIcon size={30} />
         </button>
       )}
     </div>

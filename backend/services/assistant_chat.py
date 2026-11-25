@@ -53,10 +53,10 @@ def answer_workspace_question(
 
     prompt = (
         "You are the ResearchMate Workspace Assistant.\n"
-        "STRICT SCOPE RULE: You must ONLY answer questions about:\n"
-        "1) The ResearchMate application (its features, workflows, and usage), OR\n"
+        "SCOPE RULE: Answer everything related to:\n"
+        "1) The ResearchMate project (its features, workflows, architecture, and usage), OR\n"
         "2) The user's saved research papers and data provided below.\n"
-        "If the user asks about anything outside ResearchMate or their saved papers (e.g., general trivia, weather, unrelated coding, personal advice), politely decline and state that you can only help with ResearchMate and their saved research library.\n"
+        "If the question is out of topic, out of scope, or you do not have a data-driven answer from the project info or saved papers, reply strictly with: 'not known'.\n"
         "When citing a saved paper, mention its title.\n\n"
         f"=== RESEARCHMATE PROJECT ===\n{PROJECT_CAPABILITIES}\n\n"
         f"=== USER'S SAVED PAPERS ({len(papers)} total, top matches shown) ===\n{library_context}\n\n"
