@@ -23,6 +23,74 @@ function RobotIcon({ size = 28 }) {
   );
 }
 
+function FormattedAssistantMessage({ text }) {
+  const lines = String(text || "").split(/\r?\n/);
+  const blocks = [];
+  let currentList = [];
+
+  for (const rawLine of lines) {
+    const trimmed = rawLine.trim();
+    const bulletMatch = trimmed.match(/^(?:[-*•]|\d+\.)\s+(.*)$/);
+    if (bulletMatch) {
+      currentList.push(bulletMatch[1]);
+    } else {
+      if (currentList.length > 0) {
+        blocks.push({ type: "list", items: currentList });
+        currentList = [];
+      }
+      if (trimmed) {
+        blocks.push({ type: "text", content: trimmed });
+      }
+    }
+  }
+  if (currentList.length > 0) {
+    blocks.push({ type: "list", items: currentList });
+  }
+
+  function renderInline(content) {
+    const parts = content.split(/(\*\*[^*]+\*\*)/g);
+    return parts.map((part, i) => {
+      if (part.startsWith("**") && part.endsWith("**") && part.length > 4) {
+        return (
+          <strong key={i} style={{ fontWeight: 600 }}>
+            <MathText text={part.slice(2, -2)} />
+          </strong>
+        );
+      }
+      return <MathText key={i} text={part} />;
+    });
+  }
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
+      {blocks.map((block, idx) =>
+        block.type === "list" ? (
+          <ul
+            key={idx}
+            style={{
+              margin: 0,
+              paddingLeft: "18px",
+              display: "flex",
+              flexDirection: "column",
+              gap: "4px",
+            }}
+          >
+            {block.items.map((item, itemIdx) => (
+              <li key={itemIdx} style={{ lineHeight: 1.45 }}>
+                {renderInline(item)}
+              </li>
+            ))}
+          </ul>
+        ) : (
+          <div key={idx} style={{ lineHeight: 1.45 }}>
+            {renderInline(block.content)}
+          </div>
+        ),
+      )}
+    </div>
+  );
+}
+
 const INITIAL_GREETING = {
   role: "assistant",
   content:
@@ -163,7 +231,7 @@ export default function AssistantChatWidget() {
                   color: msg.role === "user" ? "#ffffff" : "inherit",
                 }}
               >
-                {msg.role === "assistant" ? <MathText text={msg.content} /> : msg.content}
+                {msg.role === "assistant" ? <FormattedAssistantMessage text={msg.content} /> : msg.content}
                 {msg.referenced_papers && msg.referenced_papers.length > 0 && (
                   <div style={{ display: "flex", flexWrap: "wrap", gap: "6px", marginTop: "6px" }}>
                     {msg.referenced_papers.map((p) => (
