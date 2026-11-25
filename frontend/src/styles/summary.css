@@ -377,6 +377,9 @@
   line-height: 1.75;
   color: #3f485b;
   font-size: 14px;
+  overflow-wrap: break-word;
+  overflow: visible;
+  max-height: none;
 }
 
 .summary-panel .muted {

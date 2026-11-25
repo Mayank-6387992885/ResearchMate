@@ -22,6 +22,7 @@ import { API, apiFetch } from "../services/api";
 import CitationExport from "../components/CitationExport";
 import TimedFeedback from "../components/TimedFeedback";
 import PaperChatPanel from "../components/PaperChatPanel";
+import ConfirmDialog from "../components/ConfirmDialog";
 import {
   CLASSIFICATION_LABELS,
   CLASSIFICATION_OPTIONS,
@@ -149,6 +150,16 @@ function ClassificationProgress({ task, now }) {
             : ` · About ${formatDuration(remaining)} remaining`
         )}
       </p>
+      <ConfirmDialog
+        open={confirmDeleteId !== null}
+        title="Delete Paper"
+        message="Are you sure you want to delete this paper? This action cannot be undone."
+        confirmLabel="Delete"
+        cancelLabel="Cancel"
+        danger
+        onConfirm={executeDelete}
+        onCancel={() => setConfirmDeleteId(null)}
+      />
     </div>
   );
 }
@@ -501,11 +512,17 @@ export default function MySummaries() {
     }
   }
 
+  const [confirmDeleteId, setConfirmDeleteId] = useState(null);
+
   // Delete a paper
-  async function handleDelete(id) {
-    if (!window.confirm("Are you sure you want to delete this paper?")) {
-      return;
-    }
+  function handleDelete(id) {
+    setConfirmDeleteId(id);
+  }
+
+  async function executeDelete() {
+    const id = confirmDeleteId;
+    if (!id) return;
+    setConfirmDeleteId(null);
 
     try {
       const response = await apiFetch(API.deletePaper(id), {
@@ -1061,6 +1078,16 @@ export default function MySummaries() {
           </section>
         </div>
       )}
+      <ConfirmDialog
+        open={confirmDeleteId !== null}
+        title="Delete Paper"
+        message="Are you sure you want to delete this paper? This action cannot be undone."
+        confirmLabel="Delete"
+        cancelLabel="Cancel"
+        danger
+        onConfirm={executeDelete}
+        onCancel={() => setConfirmDeleteId(null)}
+      />
     </div>
   );
 }

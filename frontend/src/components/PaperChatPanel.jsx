@@ -59,7 +59,7 @@ export default function PaperChatPanel({ paperId, paperTitle }) {
   }
 
   return (
-    <section className="panel paper-chat-panel" style={{ marginTop: "1rem" }}>
+    <section className="panel paper-chat-panel" style={{ marginTop: "1rem", marginBottom: "18px" }}>
       <div className="panel-heading">
         <div>
           <p className="eyebrow">ASK PAPER (RAG)</p>

@@ -384,6 +384,27 @@ async def upload_paper(
         if not content:
             raise HTTPException(status_code=400, detail="The uploaded file is empty.")
 
+        import hashlib
+
+        uploaded_hash = hashlib.sha256(content).hexdigest()
+        existing_papers = db.query(ResearchPaper).filter(ResearchPaper.user_id == user.id).all()
+        for existing in existing_papers:
+            if existing.file_path and os.path.exists(existing.file_path):
+                h = hashlib.sha256()
+                with open(existing.file_path, "rb") as ef:
+                    for chunk in iter(lambda: ef.read(65536), b""):
+                        h.update(chunk)
+                if h.hexdigest() == uploaded_hash:
+                    raise HTTPException(
+                        status_code=409,
+                        detail=f"Duplicate PDF detected: '{existing.title}' is already in your library.",
+                    )
+            elif file.filename and existing.filename and existing.filename.lower() == file.filename.lower():
+                raise HTTPException(
+                    status_code=409,
+                    detail=f"Duplicate PDF detected: '{existing.title}' is already in your library.",
+                )
+
         set_progress(task_id, 5, "PDF uploaded. Extracting text...", user_id=user_id)
         return await _process_pdf_pipeline(
             content=content,
