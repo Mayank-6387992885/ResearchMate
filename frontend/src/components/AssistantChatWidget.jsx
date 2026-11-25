@@ -407,7 +407,16 @@ export default function AssistantChatWidget() {
 
             {!loading && (
               <div style={{ display: "flex", flexWrap: "wrap", gap: "6px", marginTop: "2px" }}>
-                {suggestions.map((suggestion) => (
+                {suggestions
+                  .filter(
+                    (s) =>
+                      !messages.some(
+                        (m) =>
+                          m.role === "user" &&
+                          m.content.trim().toLowerCase() === s.trim().toLowerCase(),
+                      ),
+                  )
+                  .map((suggestion) => (
                   <button
                     key={suggestion}
                     type="button"
