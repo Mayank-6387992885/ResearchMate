@@ -259,7 +259,15 @@ def get_public_profile(user_id: int, db: Session = Depends(get_db)):
     if not user:
         raise HTTPException(status_code=404, detail="Researcher profile not found.")
 
-    privacy = getattr(user, "privacy_settings", None) or {}
+    import json
+    raw_privacy = getattr(user, "privacy_settings", None)
+    if isinstance(raw_privacy, str):
+        try:
+            privacy = json.loads(raw_privacy)
+        except Exception:
+            privacy = {}
+    else:
+        privacy = raw_privacy or {}
     if not isinstance(privacy, dict) or not privacy.get("public_profile", False):
         raise HTTPException(status_code=403, detail="This researcher profile is private.")
 

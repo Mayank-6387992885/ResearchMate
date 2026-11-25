@@ -27,12 +27,12 @@ def test_public_profile_returns_display_name_and_saved_papers(tmp_path):
     user = User(
         email="alice@research.org",
         password_hash="x",
-        privacy_settings={"public_profile": True},
+        privacy_settings='{"public_profile": true}',
     )
     private_user = User(
         email="bob@research.org",
         password_hash="x",
-        privacy_settings={"public_profile": False},
+        privacy_settings='{"public_profile": false}',
     )
     db.add_all([user, private_user])
     db.commit()
