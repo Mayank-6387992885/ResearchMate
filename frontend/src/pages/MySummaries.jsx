@@ -18,6 +18,7 @@ import {
 } from "lucide-react";
 
 import { API, apiFetch } from "../services/api";
+import CitationExport from "../components/CitationExport";
 import TimedFeedback from "../components/TimedFeedback";
 import {
   CLASSIFICATION_LABELS,
@@ -693,6 +694,8 @@ export default function MySummaries() {
                   PDF
                 </a>
 
+                <CitationExport paperId={paper.id} />
+
                 <button
                   className="secondary-button paper-action-button"
                   type="button"
@@ -766,6 +769,8 @@ export default function MySummaries() {
                 <FileDown size={16} />
                 Download Summary
               </a>
+
+              <CitationExport paperId={selectedPaper.id} />
 
               <button
                 className="secondary-button"
