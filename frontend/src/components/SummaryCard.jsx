@@ -1,6 +1,7 @@
 import { Copy, Check } from "lucide-react";
 import { useState } from "react";
 import { formatSummaryText } from "../utils/formatSummary";
+import MathText from "./MathText";
 
 export default function SummaryCard({ summary, filename }) {
   const [copied, setCopied] = useState(false);
@@ -28,7 +29,9 @@ export default function SummaryCard({ summary, filename }) {
           {copied ? "Copied" : "Copy"}
         </button>
       </div>
-      <article className="summary-text">{formatSummaryText(summary)}</article>
+      <article className="summary-text">
+        <MathText text={formatSummaryText(summary)} />
+      </article>
     </section>
   );
 }
