@@ -401,7 +401,7 @@ export default function AssistantChatWidget() {
               </div>
             ))}
 
-            {messages.length === 1 && !loading && (
+            {!loading && (
               <div style={{ display: "flex", flexWrap: "wrap", gap: "6px", marginTop: "2px" }}>
                 {SUGGESTED_QUESTIONS.map((suggestion) => (
                   <button
