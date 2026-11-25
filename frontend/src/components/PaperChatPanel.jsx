@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { MessageSquare, Send, LoaderCircle, BookOpen, AlertCircle } from "lucide-react";
 import { API, apiFetch } from "../services/api";
+import MathText from "./MathText";
 
 export default function PaperChatPanel({ paperId, paperTitle }) {
   const [question, setQuestion] = useState("");
@@ -92,9 +93,9 @@ export default function PaperChatPanel({ paperId, paperTitle }) {
               <p style={{ fontWeight: 600, margin: "0 0 0.4rem 0" }}>
                 Q: {item.question}
               </p>
-              <p style={{ margin: "0 0 0.6rem 0", whiteSpace: "pre-wrap" }}>
-                {item.answer}
-              </p>
+              <div style={{ margin: "0 0 0.6rem 0", whiteSpace: "pre-wrap" }}>
+                <MathText text={item.answer} />
+              </div>
               {item.citations.length > 0 && (
                 <div style={{ display: "flex", flexWrap: "wrap", gap: "0.4rem" }}>
                   {item.citations.map((cite, idx) => (
