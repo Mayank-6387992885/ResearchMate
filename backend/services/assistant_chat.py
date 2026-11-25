@@ -58,6 +58,7 @@ def answer_workspace_question(
         "2) The user's saved research papers and data provided below.\n"
         "If the question is out of topic, out of scope, or you do not have a data-driven answer from the project info or saved papers, reply strictly with: 'not known'.\n"
         "FORMAT RULE: Present your answer using clear, concise bullet points (e.g. '- **Point**: detail') instead of long paragraphs so it is easy to scan.\n"
+        "EVIDENCE RULE: Give a complete, well-finished answer backed by concrete data, numbers, and facts from the saved papers or project details. Never cut off mid-sentence.\n"
         "When citing a saved paper, mention its title.\n\n"
         f"=== RESEARCHMATE PROJECT ===\n{PROJECT_CAPABILITIES}\n\n"
         f"=== USER'S SAVED PAPERS ({len(papers)} total, top matches shown) ===\n{library_context}\n\n"
@@ -67,7 +68,7 @@ def answer_workspace_question(
 
     answer = summarizer.stream_ollama(
         prompt,
-        max_tokens=500,
+        max_tokens=1500,
         json_format=False,
         provider=provider,
         model=model,
