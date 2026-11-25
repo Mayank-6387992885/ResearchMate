@@ -22,6 +22,7 @@ from starlette.concurrency import run_in_threadpool
 from database import Base, SessionLocal, engine, get_db
 from auth import get_current_user, router as auth_router
 from classification import CLASSIFICATION_PROGRESS_FIELDS, classify_research_paper
+from models.paper_embedding import PaperEmbedding  # Ensure model is registered with SQLAlchemy.
 from models.progress_task import ProgressTask
 from models.research_paper import ResearchPaper  # Ensure model is registered with SQLAlchemy.
 from models.sms_verification import SmsVerification  # Ensure model is registered with SQLAlchemy.
@@ -29,6 +30,7 @@ from models.user import User
 import services.citation_service as citation_service
 import services.import_service as import_service
 import services.paper_service as paper_service
+from services.semantic_search import semantic_search_papers
 from figures import extract_paper_figures
 from summarizer import (
     extract_research_metrics,
@@ -616,6 +618,37 @@ def get_papers(
         db, user.id, search=search, saved_only=saved_only, category=category
     )
     return {"papers": [paper_to_dict(paper) for paper in papers], "total": len(papers)}
+
+
+@app.get("/papers/search")
+@app.get("/api/papers/search")
+def search_papers_endpoint(
+    q: str = "",
+    mode: str = "semantic",
+    saved_only: bool = False,
+    category: str | None = None,
+    limit: int = 20,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    papers = getattr(paper_service, "list_papers")(
+        db, user.id, search=None, saved_only=saved_only, category=category
+    )
+    ranked, backend_used = semantic_search_papers(
+        db, papers, query=q, mode=mode, limit=max(1, min(limit, 100))
+    )
+    results = []
+    for item in ranked:
+        data = paper_to_dict(item["paper"])
+        data["relevance_score"] = item["score"]
+        data["snippet"] = item["snippet"]
+        results.append(data)
+    return {
+        "papers": results,
+        "total": len(results),
+        "mode": mode,
+        "backend": backend_used,
+    }
 
 
 @app.get("/papers/{paper_id}")

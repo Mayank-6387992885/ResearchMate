@@ -154,6 +154,7 @@ function ClassificationProgress({ task, now }) {
 export default function MySummaries() {
   const [papers, setPapers] = useState([]);
   const [search, setSearch] = useState("");
+  const [searchMode, setSearchMode] = useState("keyword");
   const [domainFilter, setDomainFilter] = useState("");
   const [sortBy, setSortBy] = useState("name");
   const [sortDirection, setSortDirection] = useState("asc");
@@ -214,19 +215,27 @@ export default function MySummaries() {
   }, [visiblePapers, groupBy]);
 
   // Retrieve papers from the backend
-  async function loadPapers(searchTerm = "") {
+  async function loadPapers(searchTerm = "", mode = searchMode) {
     try {
       setLoading(true);
       setError("");
 
-      const params = new URLSearchParams();
-      if (searchTerm.trim()) {
-        params.set("search", searchTerm.trim());
+      let url = API.papers;
+      if (mode === "semantic" && searchTerm.trim()) {
+        const params = new URLSearchParams({
+          q: searchTerm.trim(),
+          mode: "semantic",
+        });
+        url = `${API.searchPapers}?${params.toString()}`;
+      } else {
+        const params = new URLSearchParams();
+        if (searchTerm.trim()) {
+          params.set("search", searchTerm.trim());
+        }
+        if (params.toString()) {
+          url = `${API.papers}?${params.toString()}`;
+        }
       }
-
-      const url = params.toString()
-        ? `${API.papers}?${params.toString()}`
-        : API.papers;
 
       const response = await apiFetch(url);
       const data = await response.json();
@@ -245,11 +254,11 @@ export default function MySummaries() {
 
   useEffect(() => {
     const timer = setTimeout(() => {
-      loadPapers(search);
+      loadPapers(search, searchMode);
     }, 300);
 
     return () => clearTimeout(timer);
-  }, [search]);
+  }, [search, searchMode]);
 
   useEffect(() => {
     if (classificationTask?.status !== "processing") return undefined;
@@ -509,10 +518,19 @@ export default function MySummaries() {
           <Search size={18} />
           <input
             type="text"
-            placeholder="Search papers by title..."
+            placeholder={searchMode === "semantic" ? "Search papers by meaning..." : "Search papers by title..."}
             value={search}
             onChange={(event) => setSearch(event.target.value)}
           />
+          <button
+            type="button"
+            className={`secondary-button ${searchMode === "semantic" ? "active" : ""}`}
+            onClick={() => setSearchMode((prev) => (prev === "semantic" ? "keyword" : "semantic"))}
+            title="Toggle semantic search"
+            aria-pressed={searchMode === "semantic"}
+          >
+            {searchMode === "semantic" ? "Semantic: On" : "Semantic: Off"}
+          </button>
         </div>
         <label className="category-filter">
           <span>Research domain</span>
