@@ -21,7 +21,7 @@ from services.paper_chat import (
     retrieve_relevant_chunks_with_embeddings,
 )
 from services.semantic_search import semantic_search_papers
-from summarizer import compare_papers
+from summarizer import compare_papers, stream_ollama
 
 router = APIRouter()
 
@@ -296,3 +296,33 @@ def get_public_profile(user_id: int, db: Session = Depends(get_db)):
             for p in saved_papers
         ],
     }
+
+
+@router.post("/api/papers/{paper_id}/analyze-gaps")
+async def analyze_paper_gaps_and_methodology(
+    paper_id: int,
+    x_ai_provider: str | None = Header(default=None),
+    x_ai_model: str | None = Header(default=None),
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """Extract research objectives, methodology analysis, and research gaps for a paper."""
+    paper = getattr(paper_service, "get_paper_or_404")(db, paper_id, user.id)
+    prompt = (
+        f"Analyze the following research paper summary for '{paper.title}'.\n"
+        "Return a concise structured JSON object with keys: "
+        "'objectives' (list of strings), 'methodology_analysis' (string), and 'research_gaps' (list of strings).\n\n"
+        f"Summary:\n{(paper.summary or '')[:3000]}"
+    )
+    try:
+        raw = await run_in_threadpool(
+            stream_ollama,
+            prompt,
+            max_tokens=700,
+            json_format=True,
+            provider=x_ai_provider,
+            model=x_ai_model,
+        )
+        return {"paper_id": paper.id, "title": paper.title, "analysis": raw}
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"Gap analysis failed: {exc}") from exc
