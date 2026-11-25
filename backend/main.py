@@ -34,6 +34,7 @@ from services.semantic_search import semantic_search_papers
 from services.paper_chat import PaperChunk, answer_paper_question, extract_chunks_from_pdf
 from figures import extract_paper_figures
 from summarizer import (
+    compare_papers,
     extract_research_metrics,
     get_last_fallback_notice,
     set_last_fallback_notice,
@@ -115,6 +116,10 @@ class PaperImportRequest(BaseModel):
 class PaperChatRequest(BaseModel):
     question: str = Field(..., min_length=1, max_length=2000)
     history: list[dict[str, str]] = Field(default_factory=list)
+
+
+class ComparePapersRequest(BaseModel):
+    paper_ids: list[int] = Field(..., min_length=2, max_length=4)
 
 
 @app.on_event("startup")
@@ -655,6 +660,51 @@ def search_papers_endpoint(
         "mode": mode,
         "backend": backend_used,
     }
+
+
+@app.post("/api/papers/compare")
+async def compare_selected_papers(
+    payload: ComparePapersRequest,
+    x_ai_provider: str | None = Header(default=None),
+    x_ai_model: str | None = Header(default=None),
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    unique_ids = list(dict.fromkeys(payload.paper_ids))
+    if len(unique_ids) < 2 or len(unique_ids) > 4:
+        raise HTTPException(
+            status_code=422,
+            detail="Select between 2 and 4 unique papers to compare.",
+        )
+
+    papers = [
+        getattr(paper_service, "get_paper_or_404")(db, paper_id, user.id)
+        for paper_id in unique_ids
+    ]
+    papers_data = [
+        {
+            "id": paper.id,
+            "title": paper.title,
+            "summary": paper.summary,
+            "pages": paper.pages,
+            "category": paper.category,
+            "classification": paper.classification or {},
+        }
+        for paper in papers
+    ]
+
+    try:
+        return await run_in_threadpool(
+            compare_papers,
+            papers_data,
+            provider=x_ai_provider,
+            model=x_ai_model,
+        )
+    except Exception as exc:
+        raise HTTPException(
+            status_code=502,
+            detail=f"Could not compare papers: {exc}",
+        ) from exc
 
 
 @app.get("/papers/{paper_id}")

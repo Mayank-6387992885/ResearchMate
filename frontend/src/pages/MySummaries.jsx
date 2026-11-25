@@ -14,7 +14,8 @@ import {
   LoaderCircle,
   X,
   ArrowUpDown,
-  Sparkles
+  Sparkles,
+  GitCompare
 } from "lucide-react";
 
 import { API, apiFetch } from "../services/api";
@@ -171,6 +172,60 @@ export default function MySummaries() {
   const [savingEdit, setSavingEdit] = useState(false);
   const [classificationTask, setClassificationTask] = useState(null);
   const [clockNow, setClockNow] = useState(Date.now());
+  const [compareMode, setCompareMode] = useState(false);
+  const [compareSelectedIds, setCompareSelectedIds] = useState([]);
+  const [comparing, setComparing] = useState(false);
+  const [compareResult, setCompareResult] = useState(null);
+  const [compareError, setCompareError] = useState("");
+  const [showCompareModal, setShowCompareModal] = useState(false);
+
+  function toggleCompareMode() {
+    setCompareMode((prev) => {
+      if (prev) {
+        setCompareSelectedIds([]);
+        setCompareError("");
+      }
+      return !prev;
+    });
+  }
+
+  function toggleCompareSelection(paperId) {
+    setCompareError("");
+    setCompareSelectedIds((prev) => {
+      if (prev.includes(paperId)) {
+        return prev.filter((id) => id !== paperId);
+      }
+      if (prev.length >= 4) {
+        setCompareError("You can compare up to 4 papers at a time.");
+        return prev;
+      }
+      return [...prev, paperId];
+    });
+  }
+
+  async function handleCompareSelected() {
+    if (compareSelectedIds.length < 2 || compareSelectedIds.length > 4) return;
+    setShowCompareModal(true);
+    setComparing(true);
+    setCompareError("");
+    setCompareResult(null);
+    try {
+      const response = await apiFetch(API.comparePapers, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ paper_ids: compareSelectedIds }),
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        throw new Error(data.detail || "Could not compare selected papers.");
+      }
+      setCompareResult(data);
+    } catch (err) {
+      setCompareError(err.message || "Could not compare selected papers.");
+    } finally {
+      setComparing(false);
+    }
+  }
 
   const visiblePapers = useMemo(() => {
     const filtered = papers.filter((paper) => {
@@ -513,6 +568,26 @@ export default function MySummaries() {
             <RefreshCw size={16} />
             Refresh
           </button>
+          <button
+            className={compareMode ? "primary-button" : "secondary-button"}
+            type="button"
+            onClick={toggleCompareMode}
+            disabled={loading || papers.length < 2}
+          >
+            <GitCompare size={16} />
+            {compareMode ? "Cancel Compare" : "Compare Papers"}
+          </button>
+          {compareMode && (
+            <button
+              className="primary-button"
+              type="button"
+              onClick={handleCompareSelected}
+              disabled={compareSelectedIds.length < 2 || compareSelectedIds.length > 4 || comparing}
+            >
+              <Sparkles size={16} />
+              Compare Selected ({compareSelectedIds.length}/4)
+            </button>
+          )}
         </div>
 
         <div className="search-box">
@@ -616,6 +691,15 @@ export default function MySummaries() {
             <section className="panel paper-card" key={paper.id}>
               <div className="paper-card-content">
                 <div className="paper-card-heading">
+                  {compareMode && (
+                    <label className="compare-select-checkbox" title="Select paper for comparison">
+                      <input
+                        type="checkbox"
+                        checked={compareSelectedIds.includes(paper.id)}
+                        onChange={() => toggleCompareSelection(paper.id)}
+                      />
+                    </label>
+                  )}
                   <span className="paper-card-icon">
                     <FileText size={20} />
                   </span>
@@ -900,6 +984,80 @@ export default function MySummaries() {
                 </button>
               </div>
             </form>
+          </section>
+        </div>
+      )}
+
+      {showCompareModal && (
+        <div className="modal-backdrop" role="dialog" aria-modal="true" aria-label="Cross-Paper Comparison">
+          <section className="panel compare-modal">
+            <div className="modal-header">
+              <div>
+                <p className="eyebrow">Cross-Paper Comparison</p>
+                <h2>Comparison Matrix</h2>
+              </div>
+              <button
+                className="icon-button"
+                type="button"
+                aria-label="Close comparison"
+                onClick={() => setShowCompareModal(false)}
+              >
+                <X size={20} />
+              </button>
+            </div>
+
+            {comparing && (
+              <div className="loading-state">
+                <LoaderCircle className="spin" size={24} />
+                <p>Analyzing and comparing selected papers...</p>
+              </div>
+            )}
+
+            {compareError && (
+              <div className="error-message" role="alert">
+                <AlertCircle size={18} />
+                {compareError}
+              </div>
+            )}
+
+            {compareResult && Array.isArray(compareResult.papers) && (
+              <div className="compare-modal-body">
+                {compareResult.synthesis && (
+                  <div className="compare-synthesis">
+                    <strong>Synthesis</strong>
+                    <p>{compareResult.synthesis}</p>
+                  </div>
+                )}
+                <div className="compare-table-wrapper">
+                  <table className="compare-table">
+                    <thead>
+                      <tr>
+                        <th>Dimension</th>
+                        {compareResult.papers.map((item) => (
+                          <th key={item.id}>{item.title}</th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {[
+                        ["methodology", "Methodology"],
+                        ["datasets", "Datasets"],
+                        ["key_metrics", "Key Metrics"],
+                        ["strengths", "Strengths"],
+                        ["limitations", "Limitations"],
+                      ].map(([key, label]) => (
+                        <tr key={key}>
+                          <td className="compare-dimension">{label}</td>
+                          {compareResult.papers.map((item) => (
+                            <td key={`${item.id}-${key}`}>{item[key] || "Not specified"}</td>
+                          ))}
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            )}
           </section>
         </div>
       )}
