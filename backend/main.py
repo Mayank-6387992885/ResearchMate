@@ -257,6 +257,21 @@ async def _process_pdf_pipeline(
         classification=initial_meta,
     )
 
+    try:
+        from services.paper_chat import extract_chunks_from_pdf, retrieve_relevant_chunks_with_embeddings
+        ingestion_chunks = extract_chunks_from_pdf(content)
+        if ingestion_chunks:
+            await run_in_threadpool(
+                retrieve_relevant_chunks_with_embeddings,
+                db,
+                paper.id,
+                paper.title or "summary",
+                ingestion_chunks,
+                1,
+            )
+    except Exception:
+        pass
+
     classification_error = None
     report_progress(94, "Classifying research domains and paper type...")
     try:
