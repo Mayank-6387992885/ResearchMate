@@ -358,8 +358,13 @@ def retrieve_relevant_chunks_with_embeddings(
         if not vec:
             return retrieve_relevant_chunks(question, chunks, top_k=top_k)
 
-        score = _cosine_similarity(query_vec, vec)
-        scored.append((score, chunk))
+        emb_score = _cosine_similarity(query_vec, vec)
+        q_tokens = set(re.findall(r"[a-z0-9]{2,}", question.lower())) - _STOPWORDS
+        c_tokens = set(re.findall(r"[a-z0-9]{2,}", f"{chunk.section} {chunk.text}".lower()))
+        lexical_score = (len(q_tokens & c_tokens) / max(len(q_tokens), 1)) if q_tokens else 0.0
+        section_boost = 0.1 if (q_tokens & set(re.findall(r"[a-z0-9]{2,}", chunk.section.lower()))) else 0.0
+        hybrid_score = (0.7 * emb_score) + (0.3 * lexical_score) + section_boost
+        scored.append((hybrid_score, chunk))
 
     if new_rows and db is not None:
         try:
