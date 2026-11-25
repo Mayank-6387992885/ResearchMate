@@ -1087,3 +1087,97 @@ PAPER TEXT & SUMMARY:
 
     return _fallback_regex_extract()
 
+
+def compare_papers(
+    papers_data: list[dict[str, Any]],
+    provider: str | None = None,
+    model: str | None = None,
+) -> dict[str, Any]:
+    """Compare 2 to 4 research papers and return a structured comparison matrix.
+
+    Each item in `papers_data` should include `id`, `title`, and optionally
+    `summary`, `pages`, `category`, and `classification`.
+    """
+    if len(papers_data) < 2 or len(papers_data) > 4:
+        raise ValueError("Between 2 and 4 papers are required for comparison.")
+
+    paper_blocks: list[str] = []
+    for idx, paper in enumerate(papers_data, start=1):
+        classification_text = json.dumps(paper.get("classification") or {}, ensure_ascii=False)
+        summary_text = str(paper.get("summary") or "").strip()[:2200]
+        paper_blocks.append(
+            f"Paper {idx} (ID: {paper['id']}):\n"
+            f"Title: {paper.get('title', 'Untitled')}\n"
+            f"Pages: {paper.get('pages', 'N/A')} | Category: {paper.get('category', 'Uncategorized')}\n"
+            f"Classification: {classification_text}\n"
+            f"Summary:\n{summary_text}"
+        )
+
+    prompt = (
+        "You are an expert academic research analyst. Compare the following research papers "
+        "across five dimensions: methodology, datasets, key_metrics, strengths, and limitations.\n\n"
+        "Return ONLY a valid JSON object with this exact structure (no markdown fences, no extra text):\n"
+        "{\n"
+        '  "papers": [\n'
+        "    {\n"
+        '      "id": <integer paper id>,\n'
+        '      "title": "<paper title>",\n'
+        '      "methodology": "<concise 1-2 sentence summary>",\n'
+        '      "datasets": "<datasets/benchmarks used or N/A>",\n'
+        '      "key_metrics": "<key quantitative/qualitative results>",\n'
+        '      "strengths": "<main strengths>",\n'
+        '      "limitations": "<main limitations or gaps>"\n'
+        "    }\n"
+        "  ],\n"
+        '  "synthesis": "<2-3 sentence cross-paper synthesis highlighting key differences and trends>"\n'
+        "}\n\n"
+        + "\n\n---\n\n".join(paper_blocks)
+    )
+
+    raw_output = stream_ollama(
+        prompt,
+        max_tokens=1500,
+        json_format=True,
+        provider=provider,
+        model=model,
+    )
+
+    clean_json = (raw_output or "").strip()
+    if "```" in clean_json:
+        clean_json = re.sub(r"^```(?:json)?\s*", "", clean_json, flags=re.MULTILINE)
+        clean_json = re.sub(r"\s*```$", "", clean_json, flags=re.MULTILINE).strip()
+
+    start = clean_json.find("{")
+    end = clean_json.rfind("}")
+    if start != -1 and end != -1:
+        clean_json = clean_json[start : end + 1]
+
+    parsed = json.loads(clean_json)
+    if not isinstance(parsed, dict):
+        raise ValueError("AI comparison response was not a JSON object.")
+
+    raw_papers = parsed.get("papers")
+    if not isinstance(raw_papers, list):
+        raise ValueError("AI comparison response missing 'papers' list.")
+
+    by_id = {int(item["id"]): item for item in raw_papers if isinstance(item, dict) and "id" in item}
+    normalized_papers: list[dict[str, Any]] = []
+    for paper in papers_data:
+        pid = int(paper["id"])
+        entry = by_id.get(pid, {})
+        normalized_papers.append({
+            "id": pid,
+            "title": str(entry.get("title") or paper.get("title") or "Untitled"),
+            "methodology": str(entry.get("methodology") or "Not specified"),
+            "datasets": str(entry.get("datasets") or "Not specified"),
+            "key_metrics": str(entry.get("key_metrics") or "Not specified"),
+            "strengths": str(entry.get("strengths") or "Not specified"),
+            "limitations": str(entry.get("limitations") or "Not specified"),
+        })
+
+    return {
+        "papers": normalized_papers,
+        "synthesis": str(parsed.get("synthesis") or "").strip(),
+    }
+
+

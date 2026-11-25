@@ -59,6 +59,7 @@ export const API = {
   get upload() { return `${getApiBaseUrl()}/upload`; },
   progress: (taskId) => `${getApiBaseUrl()}/progress/${taskId}`,
   get papers() { return `${getApiBaseUrl()}/papers`; },
+  get comparePapers() { return `${getApiBaseUrl()}/api/papers/compare`; },
   getPaper: (id) => `${getApiBaseUrl()}/papers/${id}`,
   savePaper: (id) => `${getApiBaseUrl()}/papers/${id}/save`,
   updatePaper: (id) => `${getApiBaseUrl()}/papers/${id}`,
