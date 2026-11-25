@@ -62,6 +62,7 @@ export const API = {
   get papers() { return `${getApiBaseUrl()}/papers`; },
   get searchPapers() { return `${getApiBaseUrl()}/papers/search`; },
   get comparePapers() { return `${getApiBaseUrl()}/api/papers/compare`; },
+  get assistantChat() { return `${getApiBaseUrl()}/api/assistant/chat`; },
   getPaper: (id) => `${getApiBaseUrl()}/papers/${id}`,
   savePaper: (id) => `${getApiBaseUrl()}/papers/${id}/save`,
   updatePaper: (id) => `${getApiBaseUrl()}/papers/${id}`,

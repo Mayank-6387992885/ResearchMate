@@ -32,6 +32,7 @@ import services.import_service as import_service
 import services.paper_service as paper_service
 from services.semantic_search import semantic_search_papers
 from services.paper_chat import PaperChunk, answer_paper_question, extract_chunks_from_pdf
+from services.assistant_chat import answer_workspace_question
 from figures import extract_paper_figures
 from summarizer import (
     compare_papers,
@@ -704,6 +705,37 @@ async def compare_selected_papers(
         raise HTTPException(
             status_code=502,
             detail=f"Could not compare papers: {exc}",
+        ) from exc
+
+
+@app.post("/assistant/chat")
+@app.post("/api/assistant/chat")
+async def chat_with_workspace_assistant(
+    payload: PaperChatRequest,
+    x_ai_provider: str | None = Header(default=None),
+    x_ai_model: str | None = Header(default=None),
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    question = payload.question.strip()
+    if not question:
+        raise HTTPException(status_code=422, detail="Question cannot be empty.")
+
+    papers = getattr(paper_service, "list_papers")(db, user.id, search=None, saved_only=False)
+    try:
+        return await run_in_threadpool(
+            answer_workspace_question,
+            db,
+            papers,
+            question,
+            history=payload.history,
+            provider=x_ai_provider,
+            model=x_ai_model,
+        )
+    except Exception as exc:
+        raise HTTPException(
+            status_code=502,
+            detail=f"Assistant chat failed: {exc}",
         ) from exc
 
 

@@ -3,6 +3,7 @@ import { useEffect, useLayoutEffect, useState } from "react";
 
 import Header from "./components/Header";
 import Sidebar from "./components/Sidebar";
+import AssistantChatWidget from "./components/AssistantChatWidget";
 
 import Dashboard from "./pages/Dashboard";
 import AutoSummary from "./pages/AutoSummary";
@@ -223,6 +224,7 @@ export default function App() {
           )}
         </main>
       </div>
+      <AssistantChatWidget />
     </div>
   );
 }
