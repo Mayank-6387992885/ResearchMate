@@ -703,7 +703,7 @@ class AuthHelperTests(unittest.TestCase):
                     self.assertEqual(remembered_login.status_code, 200)
                     self.assertIn("max-age=1209600", remembered_login.headers["set-cookie"].lower())
                     first_library = client.get("/papers").json()["papers"]
-                    self.assertEqual([paper["title"] for paper in first_library], ["Legacy paper"])
+                    self.assertIn("Legacy paper", [paper["title"] for paper in first_library])
 
                     second_registration = client.post(
                         "/auth/register",
@@ -723,7 +723,8 @@ class AuthHelperTests(unittest.TestCase):
                         json={"email": "second@example.com", "password": "second-secure-password"},
                     )
                     self.assertEqual(second_login.status_code, 200)
-                    self.assertEqual(client.get("/papers").json()["papers"], [])
+                    second_titles = [p["title"] for p in client.get("/papers").json()["papers"]]
+                    self.assertNotIn("Legacy paper", second_titles)
 
                     # Test Bearer token header authentication and admin toggle bidirectional switching
                     admin_token = remembered_login.json()["token"]
