@@ -30,6 +30,7 @@ from models.auth_token import AuthToken
 from models.research_paper import ResearchPaper
 from models.sms_verification import SmsVerification
 from models.user import User
+from services.sample_papers import seed_sample_papers
 
 load_dotenv(os.path.join(os.path.dirname(__file__), ".env"))
 
@@ -871,6 +872,7 @@ def register(payload: Credentials, db: Session = Depends(get_db)):
             and db.query(User.id).filter(User.email_verified.is_(True)).count() == 1
         ):
             _claim_legacy_papers(db, user.id)
+        seed_sample_papers(db, user.id)
         if send_verification_email:
             verification_token = secrets.token_urlsafe(48)
             db.add(AuthToken(
@@ -1464,6 +1466,7 @@ def google_callback(
 
     if was_first_verified_account:
         _claim_legacy_papers(db, user.id)
+    seed_sample_papers(db, user.id)
 
     db.query(AuthToken).filter(
         AuthToken.user_id == user.id,
@@ -1576,6 +1579,7 @@ def _complete_provider_login(
 
     if was_first_verified_account:
         _claim_legacy_papers(db, user.id)
+    seed_sample_papers(db, user.id)
 
     db.query(AuthToken).filter(
         AuthToken.user_id == user.id,
