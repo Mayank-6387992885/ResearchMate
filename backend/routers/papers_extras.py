@@ -9,6 +9,7 @@ from sqlalchemy.orm import Session
 
 from auth import get_current_user
 from database import get_db
+from models.research_paper import ResearchPaper
 from models.user import User
 import services.citation_service as citation_service
 import services.paper_service as paper_service
@@ -249,3 +250,34 @@ async def chat_with_paper(
             status_code=502,
             detail=f"Could not answer paper question: {exc}",
         ) from exc
+
+
+@router.get("/api/users/{user_id}/public-profile")
+def get_public_profile(user_id: int, db: Session = Depends(get_db)):
+    """Return a researcher's public profile and saved paper titles."""
+    user = db.query(User).filter(User.id == user_id).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="Researcher profile not found.")
+
+    saved_papers = (
+        db.query(ResearchPaper)
+        .filter(ResearchPaper.user_id == user_id, ResearchPaper.is_saved.is_(True))
+        .all()
+    )
+    display_name = getattr(user, "full_name", None) or (
+        user.email.split("@")[0] if getattr(user, "email", None) else f"Researcher #{user.id}"
+    )
+    return {
+        "id": user.id,
+        "display_name": display_name,
+        "saved_papers_count": len(saved_papers),
+        "saved_papers": [
+            {
+                "id": p.id,
+                "title": p.title,
+                "category": p.category,
+                "pages": p.pages,
+            }
+            for p in saved_papers
+        ],
+    }
