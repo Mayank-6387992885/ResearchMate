@@ -27,6 +27,7 @@ from models.research_paper import ResearchPaper  # Ensure model is registered wi
 from models.sms_verification import SmsVerification  # Ensure model is registered with SQLAlchemy.
 from models.user import User
 import services.paper_service as paper_service
+from services.paper_chat import PaperChunk, answer_paper_question, extract_chunks_from_pdf
 from figures import extract_paper_figures
 from summarizer import (
     extract_research_metrics,
@@ -101,6 +102,11 @@ class PaperUpdate(BaseModel):
     title: str | None = Field(default=None, min_length=1, max_length=255)
     category: str | None = None
     classification: dict[str, list[str]] | None = None
+
+
+class PaperChatRequest(BaseModel):
+    question: str = Field(..., min_length=1, max_length=2000)
+    history: list[dict[str, str]] = Field(default_factory=list)
 
 
 @app.on_event("startup")
@@ -708,3 +714,54 @@ def remove_paper(
 ):
     getattr(paper_service, "delete_paper")(db, paper_id, user.id)
     return {"message": "Paper deleted successfully.", "id": paper_id}
+
+
+@app.post("/papers/{paper_id}/chat")
+async def chat_with_paper(
+    paper_id: int,
+    payload: PaperChatRequest,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+    x_ai_provider: str | None = Header(default=None, alias="X-AI-Provider"),
+):
+    paper = getattr(paper_service, "get_paper_or_404")(db, paper_id, user.id)
+    question = payload.question.strip()
+    if not question:
+        raise HTTPException(status_code=422, detail="Question cannot be empty.")
+
+    chunks: list[PaperChunk] = []
+    try:
+        pdf_content = paper_service.get_pdf_content(paper)
+        chunks = await run_in_threadpool(extract_chunks_from_pdf, pdf_content)
+    except HTTPException:
+        chunks = []
+    except (pymupdf.FileDataError, RuntimeError, OSError):
+        chunks = []
+
+    if not chunks and (paper.summary or "").strip():
+        chunks = [
+            PaperChunk(
+                chunk_id=0,
+                page=1,
+                section="Summary",
+                text=paper.summary.strip(),
+            )
+        ]
+
+    if not chunks:
+        raise HTTPException(
+            status_code=422,
+            detail="No readable text is available for this paper.",
+        )
+
+    def _run_chat():
+        if x_ai_provider:
+            os.environ["AI_PROVIDER"] = x_ai_provider
+        return answer_paper_question(
+            question=question,
+            chunks=chunks,
+            paper_title=paper.title or "Research Paper",
+            history=payload.history,
+        )
+
+    return await run_in_threadpool(_run_chat)
