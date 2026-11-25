@@ -26,6 +26,7 @@ from models.progress_task import ProgressTask
 from models.research_paper import ResearchPaper  # Ensure model is registered with SQLAlchemy.
 from models.sms_verification import SmsVerification  # Ensure model is registered with SQLAlchemy.
 from models.user import User
+import services.citation_service as citation_service
 import services.paper_service as paper_service
 from figures import extract_paper_figures
 from summarizer import (
@@ -696,6 +697,24 @@ def download_summary(
         content,
         headers={
             "Content-Disposition": f'attachment; filename="researchmate-summary-{paper.id}.txt"'
+        },
+    )
+
+
+@app.get("/papers/{paper_id}/citation")
+def get_paper_citation(
+    paper_id: int,
+    format: str = "bibtex",
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    paper = getattr(paper_service, "get_paper_or_404")(db, paper_id, user.id)
+    content, media_type, ext = citation_service.format_citation(paper, fmt=format)
+    return PlainTextResponse(
+        content,
+        media_type=media_type,
+        headers={
+            "Content-Disposition": f'attachment; filename="researchmate-citation-{paper.id}.{ext}"'
         },
     )
 

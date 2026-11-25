@@ -65,6 +65,7 @@ export const API = {
   classifyPaper: (id) => `${getApiBaseUrl()}/papers/${id}/classify`,
   downloadPaper: (id) => `${getApiBaseUrl()}/papers/${id}/download`,
   downloadSummary: (id) => `${getApiBaseUrl()}/papers/${id}/download-summary`,
+  paperCitation: (id, format = "bibtex") => `${getApiBaseUrl()}/papers/${id}/citation?format=${encodeURIComponent(format)}`,
   deletePaper: (id) => `${getApiBaseUrl()}/papers/${id}`,
 };
 
@@ -165,4 +166,17 @@ export async function removePaper(id) {
   const data = await response.json();
   if (!response.ok) throw new Error(data.detail || "Could not delete this paper.");
   return data;
+}
+
+export async function fetchPaperCitation(id, format = "bibtex") {
+  const response = await apiFetch(API.paperCitation(id, format));
+  const text = await response.text();
+  if (!response.ok) {
+    let detail = "Could not generate citation.";
+    try {
+      detail = JSON.parse(text).detail || detail;
+    } catch {}
+    throw new Error(detail);
+  }
+  return text;
 }
