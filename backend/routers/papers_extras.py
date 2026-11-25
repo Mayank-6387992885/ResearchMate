@@ -39,8 +39,8 @@ def _paper_to_dict(paper) -> dict:
         "is_saved": paper.is_saved,
         "category": paper.category,
         "classification": paper.classification,
-        "figures": paper.figures or [],
-        "chart_data": paper.chart_data or [],
+        "figures": getattr(paper, "figures", None) or [],
+        "chart_data": getattr(paper, "chart_data", None) or [],
         "uploaded_at": paper.uploaded_at.isoformat() if paper.uploaded_at else None,
         "updated_at": paper.updated_at.isoformat() if paper.updated_at else None,
     }
@@ -160,7 +160,7 @@ def view_paper_pdf(
     user: User = Depends(get_current_user),
 ):
     paper = getattr(paper_service, "get_paper_or_404")(db, paper_id, user.id)
-    local_path = getattr(paper_service, "ensure_local_pdf_path")(paper)
+    local_path = getattr(paper_service, "resolve_local_pdf_path")(paper)
     filename = paper.filename or f"paper-{paper.id}.pdf"
     return FileResponse(
         local_path,
@@ -177,12 +177,7 @@ def get_paper_citation(
     user: User = Depends(get_current_user),
 ):
     paper = getattr(paper_service, "get_paper_or_404")(db, paper_id, user.id)
-    citation = citation_service.format_citation(paper, fmt=format)
-    return Response(
-        content=citation["content"],
-        media_type=citation["media_type"],
-        headers={"Content-Disposition": f'attachment; filename="{citation["filename"]}"'},
-    )
+    return citation_service.format_citation(paper, fmt=format)
 
 
 @router.post("/papers/{paper_id}/chat")
@@ -201,15 +196,24 @@ async def chat_with_paper(
     paper = getattr(paper_service, "get_paper_or_404")(db, paper_id, user.id)
     chunks: list[PaperChunk] = []
     try:
-        local_pdf = getattr(paper_service, "ensure_local_pdf_path")(paper)
-        if local_pdf and os.path.exists(local_pdf):
-            chunks = extract_chunks_from_pdf(local_pdf)
-    except HTTPException:
+        pdf_bytes = getattr(paper_service, "get_pdf_content")(paper)
+        if pdf_bytes:
+            import tempfile
+            with tempfile.NamedTemporaryFile(suffix=".pdf", delete=False) as tmp:
+                tmp.write(pdf_bytes)
+                tmp_path = tmp.name
+            try:
+                chunks = extract_chunks_from_pdf(tmp_path)
+            finally:
+                if os.path.exists(tmp_path):
+                    os.remove(tmp_path)
+    except Exception:
         chunks = []
 
     if not chunks and paper.summary:
         chunks = [
             PaperChunk(
+                chunk_id=0,
                 page=1,
                 section="Summary",
                 text=paper.summary,
@@ -229,8 +233,6 @@ async def chat_with_paper(
             chunks,
             paper_title=paper.title or paper.filename or f"Paper #{paper.id}",
             history=payload.history,
-            provider=x_ai_provider,
-            model=x_ai_model,
         )
     except Exception as exc:
         raise HTTPException(
