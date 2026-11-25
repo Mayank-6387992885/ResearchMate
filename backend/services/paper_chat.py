@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import math
+import os
 import re
 from collections import Counter
 from dataclasses import dataclass
@@ -13,8 +14,10 @@ import pymupdf
 from sqlalchemy.orm import Session
 
 from models.paper_chunk_embedding import PaperChunkEmbedding
-from services.semantic_search import DEFAULT_EMBEDDING_MODEL, cosine_similarity, fetch_ollama_embedding
+from services.semantic_search import cosine_similarity, fetch_ollama_embedding
 from summarizer import call_ollama
+
+DEFAULT_EMBEDDING_MODEL = os.getenv("OLLAMA_EMBEDDING_MODEL", "nomic-embed-text")
 
 _STOPWORDS = frozenset({
     "a", "an", "and", "are", "as", "at", "be", "by", "for", "from", "has", "he",
