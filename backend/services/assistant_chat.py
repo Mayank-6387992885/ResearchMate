@@ -64,11 +64,7 @@ def answer_workspace_question(
         + f"User Question: {cleaned}\n\nAnswer:"
     )
 
-    answer = summarizer.call_ollama(
-        prompt,
-        provider=provider,
-        model=model,
-    )
+    answer = summarizer.call_ollama(prompt, max_tokens=500)
 
     referenced = [
         {"id": p.id, "title": p.title}
