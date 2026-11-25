@@ -164,6 +164,16 @@ def health():
     return {"status": "healthy"}
 
 
+@app.get("/ready")
+def readiness():
+    try:
+        with SessionLocal() as db:
+            db.execute(text("SELECT 1"))
+        return {"status": "ready", "database": "connected"}
+    except Exception as exc:
+        raise HTTPException(status_code=503, detail=f"Database not ready: {exc}") from exc
+
+
 @app.get("/progress/{task_id}")
 def get_progress(task_id: str, user: User = Depends(get_current_user)):
     task = get_progress_state(task_id, user.id)
