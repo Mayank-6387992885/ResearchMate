@@ -865,6 +865,22 @@ def download_paper(
     )
 
 
+@app.get("/papers/{paper_id}/pdf")
+def view_paper_pdf(
+    paper_id: int,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    paper = getattr(paper_service, "get_paper_or_404")(db, paper_id, user.id)
+    pdf_content = paper_service.get_pdf_content(paper)
+    safe_filename = Path(paper.filename or "research-paper.pdf").name.replace('"', "")
+    return Response(
+        content=pdf_content,
+        media_type="application/pdf",
+        headers={"Content-Disposition": f'inline; filename="{safe_filename}"'},
+    )
+
+
 @app.get("/papers/{paper_id}/download-summary")
 def download_summary(
     paper_id: int,
