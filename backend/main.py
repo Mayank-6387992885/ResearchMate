@@ -345,6 +345,12 @@ def get_progress(task_id: str, user: User = Depends(get_current_user)):
     return task
 
 
+def validate_pdf_signature(content: bytes) -> None:
+    """Verify the uploaded bytes begin with a valid PDF %PDF- header."""
+    if not content or not content.lstrip().startswith(b"%PDF-"):
+        raise HTTPException(status_code=400, detail="Invalid PDF file signature.")
+
+
 async def _process_pdf_pipeline(
     content: bytes,
     original_filename: str | None,
@@ -357,6 +363,7 @@ async def _process_pdf_pipeline(
     extra_result: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Run text extraction, figure extraction, summarization, metrics, storage, and classification."""
+    validate_pdf_signature(content)
     user_id = int(getattr(user, "id", 0) or 0)
 
     def report_progress(
