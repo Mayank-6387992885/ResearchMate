@@ -87,4 +87,33 @@ def answer_workspace_question(
     return {
         "answer": answer.strip(),
         "referenced_papers": referenced,
+        "suggested_questions": _build_follow_up_suggestions(cleaned, selected_papers),
     }
+
+
+def _build_follow_up_suggestions(question: str, papers: list[ResearchPaper]) -> list[str]:
+    """Predict 3 relevant follow-up questions based on the user's query and saved papers."""
+    q_lower = question.lower()
+    suggestions: list[str] = []
+
+    if papers:
+        top_title = papers[0].title
+        if "compare" not in q_lower and len(papers) >= 2:
+            suggestions.append(f"Compare {papers[0].title[:28]} and {papers[1].title[:28]}")
+        if "metric" not in q_lower and "data" not in q_lower:
+            suggestions.append(f"What key metrics or results are in {top_title[:32]}?")
+        if "limitation" not in q_lower:
+            suggestions.append(f"What are the limitations of {top_title[:32]}?")
+
+    defaults = [
+        "Summarize my saved papers",
+        "What can ResearchMate do?",
+        "How do I export BibTeX citations?",
+    ]
+    for item in defaults:
+        if len(suggestions) >= 3:
+            break
+        if item.lower() not in q_lower and item not in suggestions:
+            suggestions.append(item)
+
+    return suggestions[:3]

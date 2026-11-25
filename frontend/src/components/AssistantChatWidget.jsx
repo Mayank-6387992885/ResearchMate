@@ -131,6 +131,7 @@ export default function AssistantChatWidget() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [copiedIdx, setCopiedIdx] = useState(null);
+  const [suggestions, setSuggestions] = useState(SUGGESTED_QUESTIONS);
   const abortControllerRef = useRef(null);
 
   async function sendQuestion(rawText) {
@@ -165,6 +166,9 @@ export default function AssistantChatWidget() {
           referenced_papers: data.referenced_papers || [],
         },
       ]);
+      if (Array.isArray(data.suggested_questions) && data.suggested_questions.length > 0) {
+        setSuggestions(data.suggested_questions);
+      }
     } catch (err) {
       if (err.name === "AbortError") {
         setError("Request cancelled.");
@@ -403,7 +407,7 @@ export default function AssistantChatWidget() {
 
             {!loading && (
               <div style={{ display: "flex", flexWrap: "wrap", gap: "6px", marginTop: "2px" }}>
-                {SUGGESTED_QUESTIONS.map((suggestion) => (
+                {suggestions.map((suggestion) => (
                   <button
                     key={suggestion}
                     type="button"
