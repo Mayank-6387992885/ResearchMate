@@ -30,9 +30,7 @@ from models.user import User
 import services.citation_service as citation_service
 import services.import_service as import_service
 import services.paper_service as paper_service
-from services.semantic_search import semantic_search_papers
-from services.paper_chat import PaperChunk, answer_paper_question, extract_chunks_from_pdf
-from services.assistant_chat import answer_workspace_question
+from routers.papers_extras import router as papers_extras_router
 from figures import extract_paper_figures
 from summarizer import (
     compare_papers,
@@ -46,6 +44,7 @@ app = FastAPI(title="ResearchMate API")
 
 # Register authentication routes
 app.include_router(auth_router)
+app.include_router(papers_extras_router)
 
 # app.add_middleware(
 #     CORSMiddleware,
@@ -112,15 +111,6 @@ class PaperUpdate(BaseModel):
 
 class PaperImportRequest(BaseModel):
     identifier: str = Field(..., min_length=1, max_length=500)
-
-
-class PaperChatRequest(BaseModel):
-    question: str = Field(..., min_length=1, max_length=2000)
-    history: list[dict[str, str]] = Field(default_factory=list)
-
-
-class ComparePapersRequest(BaseModel):
-    paper_ids: list[int] = Field(..., min_length=2, max_length=4)
 
 
 @app.on_event("startup")
@@ -630,113 +620,6 @@ def get_papers(
         db, user.id, search=search, saved_only=saved_only, category=category
     )
     return {"papers": [paper_to_dict(paper) for paper in papers], "total": len(papers)}
-
-
-@app.get("/papers/search")
-@app.get("/api/papers/search")
-def search_papers_endpoint(
-    q: str = "",
-    mode: str = "semantic",
-    saved_only: bool = False,
-    category: str | None = None,
-    limit: int = 20,
-    db: Session = Depends(get_db),
-    user: User = Depends(get_current_user),
-):
-    papers = getattr(paper_service, "list_papers")(
-        db, user.id, search=None, saved_only=saved_only, category=category
-    )
-    ranked, backend_used = semantic_search_papers(
-        db, papers, query=q, mode=mode, limit=max(1, min(limit, 100))
-    )
-    results = []
-    for item in ranked:
-        data = paper_to_dict(item["paper"])
-        data["relevance_score"] = item["score"]
-        data["snippet"] = item["snippet"]
-        results.append(data)
-    return {
-        "papers": results,
-        "total": len(results),
-        "mode": mode,
-        "backend": backend_used,
-    }
-
-
-@app.post("/api/papers/compare")
-async def compare_selected_papers(
-    payload: ComparePapersRequest,
-    x_ai_provider: str | None = Header(default=None),
-    x_ai_model: str | None = Header(default=None),
-    db: Session = Depends(get_db),
-    user: User = Depends(get_current_user),
-):
-    unique_ids = list(dict.fromkeys(payload.paper_ids))
-    if len(unique_ids) < 2 or len(unique_ids) > 4:
-        raise HTTPException(
-            status_code=422,
-            detail="Select between 2 and 4 unique papers to compare.",
-        )
-
-    papers = [
-        getattr(paper_service, "get_paper_or_404")(db, paper_id, user.id)
-        for paper_id in unique_ids
-    ]
-    papers_data = [
-        {
-            "id": paper.id,
-            "title": paper.title,
-            "summary": paper.summary,
-            "pages": paper.pages,
-            "category": paper.category,
-            "classification": paper.classification or {},
-        }
-        for paper in papers
-    ]
-
-    try:
-        return await run_in_threadpool(
-            compare_papers,
-            papers_data,
-            provider=x_ai_provider,
-            model=x_ai_model,
-        )
-    except Exception as exc:
-        raise HTTPException(
-            status_code=502,
-            detail=f"Could not compare papers: {exc}",
-        ) from exc
-
-
-@app.post("/assistant/chat")
-@app.post("/api/assistant/chat")
-async def chat_with_workspace_assistant(
-    payload: PaperChatRequest,
-    x_ai_provider: str | None = Header(default=None),
-    x_ai_model: str | None = Header(default=None),
-    db: Session = Depends(get_db),
-    user: User = Depends(get_current_user),
-):
-    question = payload.question.strip()
-    if not question:
-        raise HTTPException(status_code=422, detail="Question cannot be empty.")
-
-    papers = getattr(paper_service, "list_papers")(db, user.id, search=None, saved_only=False)
-    try:
-        return await run_in_threadpool(
-            answer_workspace_question,
-            db,
-            papers,
-            question,
-            history=payload.history,
-            provider=x_ai_provider,
-            model=x_ai_model,
-        )
-    except Exception as exc:
-        raise HTTPException(
-            status_code=502,
-            detail=f"Assistant chat failed: {exc}",
-        ) from exc
 
 
 @app.get("/papers/{paper_id}")
