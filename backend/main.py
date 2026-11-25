@@ -31,7 +31,13 @@ from models.user import User
 import services.citation_service as citation_service
 import services.import_service as import_service
 import services.paper_service as paper_service
+from core.config import settings
+from core.exceptions import register_exception_handlers
+from core.logging_config import configure_logging
+from core.rate_limit import RateLimitMiddleware
 from routers.papers_extras import router as papers_extras_router
+
+configure_logging()
 from figures import extract_paper_figures
 from summarizer import (
     compare_papers,
@@ -46,6 +52,9 @@ app = FastAPI(title="ResearchMate API")
 # Register authentication routes
 app.include_router(auth_router)
 app.include_router(papers_extras_router)
+app.include_router(papers_extras_router, prefix=settings.api_v1_prefix)
+register_exception_handlers(app)
+app.add_middleware(RateLimitMiddleware)
 
 # app.add_middleware(
 #     CORSMiddleware,
