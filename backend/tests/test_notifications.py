@@ -25,10 +25,7 @@ def test_deliver_user_notification_sends_email_when_enabled():
         password_hash="x",
         notification_preferences={"email_notifications": True, "summary_completed": True},
     )
-    with (
-        patch("auth._is_email_configured", return_value=True),
-        patch("auth._send_email") as mock_send,
-    ):
+    with patch("auth._send_email") as mock_send:
         sent = deliver_user_notification(
             user,
             "Summary Ready",

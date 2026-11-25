@@ -34,9 +34,12 @@ def deliver_user_notification(
         return False
     if not should_notify_email(user, event_type=event_type):
         return False
-    if not auth._is_email_configured():
-        logger.info("Skipping notification delivery for %s: SMTP not configured.", user.email)
+    if not getattr(auth, "_send_email", None):
         return False
 
-    auth._send_email(user.email, subject, plain_text, html_body)
-    return True
+    try:
+        auth._send_email(user.email, subject, plain_text, html_body)
+        return True
+    except Exception as exc:
+        logger.info("Skipping notification delivery for %s: %s", user.email, exc)
+        return False
