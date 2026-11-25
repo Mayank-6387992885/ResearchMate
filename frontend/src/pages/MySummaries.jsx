@@ -20,6 +20,7 @@ import {
 import { API, apiFetch } from "../services/api";
 import CitationExport from "../components/CitationExport";
 import TimedFeedback from "../components/TimedFeedback";
+import PaperChatPanel from "../components/PaperChatPanel";
 import {
   CLASSIFICATION_LABELS,
   CLASSIFICATION_OPTIONS,
@@ -777,6 +778,8 @@ export default function MySummaries() {
             <div className="summary-content">
               {formatSummaryText(selectedPaper.summary)}
             </div>
+
+            <PaperChatPanel paperId={selectedPaper.id} paperTitle={selectedPaper.title} />
 
             <div className="paper-card-actions">
               <a
