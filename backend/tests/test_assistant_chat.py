@@ -42,7 +42,7 @@ def test_assistant_chat_endpoint_returns_answer_and_references():
                 return_value=([{"paper": mock_papers[0], "score": 0.9, "snippet": "..."}], "tfidf"),
             ),
             patch(
-                "summarizer.call_ollama",
+                "summarizer.stream_ollama",
                 return_value="Based on Attention Is All You Need, it introduces the Transformer.",
             ),
             TestClient(main.app) as client,

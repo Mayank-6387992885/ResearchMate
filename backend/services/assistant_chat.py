@@ -64,7 +64,13 @@ def answer_workspace_question(
         + f"User Question: {cleaned}\n\nAnswer:"
     )
 
-    answer = summarizer.call_ollama(prompt, max_tokens=500)
+    answer = summarizer.stream_ollama(
+        prompt,
+        max_tokens=500,
+        json_format=False,
+        provider=provider,
+        model=model,
+    )
 
     referenced = [
         {"id": p.id, "title": p.title}
