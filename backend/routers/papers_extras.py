@@ -177,7 +177,12 @@ def get_paper_citation(
     user: User = Depends(get_current_user),
 ):
     paper = getattr(paper_service, "get_paper_or_404")(db, paper_id, user.id)
-    return citation_service.format_citation(paper, fmt=format)
+    citation = citation_service.format_citation(paper, fmt=format)
+    return Response(
+        content=citation["content"],
+        media_type=citation["media_type"],
+        headers={"Content-Disposition": f'attachment; filename="{citation["filename"]}"'},
+    )
 
 
 @router.post("/papers/{paper_id}/chat")
@@ -198,15 +203,7 @@ async def chat_with_paper(
     try:
         pdf_bytes = getattr(paper_service, "get_pdf_content")(paper)
         if pdf_bytes:
-            import tempfile
-            with tempfile.NamedTemporaryFile(suffix=".pdf", delete=False) as tmp:
-                tmp.write(pdf_bytes)
-                tmp_path = tmp.name
-            try:
-                chunks = extract_chunks_from_pdf(tmp_path)
-            finally:
-                if os.path.exists(tmp_path):
-                    os.remove(tmp_path)
+            chunks = extract_chunks_from_pdf(pdf_bytes)
     except Exception:
         chunks = []
 
