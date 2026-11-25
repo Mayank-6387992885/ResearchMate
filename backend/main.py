@@ -27,6 +27,7 @@ from models.research_paper import ResearchPaper  # Ensure model is registered wi
 from models.sms_verification import SmsVerification  # Ensure model is registered with SQLAlchemy.
 from models.user import User
 import services.citation_service as citation_service
+import services.import_service as import_service
 import services.paper_service as paper_service
 from figures import extract_paper_figures
 from summarizer import (
@@ -102,6 +103,10 @@ class PaperUpdate(BaseModel):
     title: str | None = Field(default=None, min_length=1, max_length=255)
     category: str | None = None
     classification: dict[str, list[str]] | None = None
+
+
+class PaperImportRequest(BaseModel):
+    identifier: str = Field(..., min_length=1, max_length=500)
 
 
 @app.on_event("startup")
@@ -326,6 +331,157 @@ def get_progress(task_id: str, user: User = Depends(get_current_user)):
     return task
 
 
+async def _process_pdf_pipeline(
+    content: bytes,
+    original_filename: str | None,
+    task_id: str,
+    start_time: float,
+    x_ai_provider: str | None,
+    x_ai_model: str | None,
+    db: Session,
+    user: User,
+    extra_result: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Run text extraction, figure extraction, summarization, metrics, storage, and classification."""
+    user_id = int(getattr(user, "id", 0) or 0)
+
+    def report_progress(
+        progress: int,
+        message: str,
+        partial_result: dict[str, Any] | None = None,
+    ) -> None:
+        set_progress(task_id, progress, message, result=partial_result, user_id=user_id)
+
+    try:
+        with pymupdf.open(stream=content, filetype="pdf") as pdf:
+            if pdf.is_encrypted:
+                raise HTTPException(status_code=400, detail="Encrypted PDFs are not supported.")
+            page_count = len(pdf)
+            text = "\n".join(str(page.get_text("text")) for page in pdf)
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(
+            status_code=400,
+            detail="Unable to read this PDF. Please upload a valid PDF file.",
+        ) from exc
+
+    if not text.strip():
+        raise HTTPException(
+            status_code=422,
+            detail="No selectable text found in the PDF. OCR may be required for scanned documents.",
+        )
+
+    report_progress(12, "Extracting figures, plots, and architecture diagrams...")
+    figures = await run_in_threadpool(extract_paper_figures, content, 8)
+
+    report_progress(15, "Text extracted. Preparing AI summarization...")
+
+    set_last_fallback_notice(None)
+    summary = await run_in_threadpool(
+        summarize_paper,
+        text,
+        report_progress,
+        x_ai_provider,
+        x_ai_model,
+    )
+
+    report_progress(93, "Extracting numerical statistics and benchmark metrics...")
+    chart_data = await run_in_threadpool(
+        extract_research_metrics,
+        text,
+        summary,
+        x_ai_provider,
+        x_ai_model,
+    )
+
+    initial_meta = {
+        "figures": figures,
+        "chart_data": chart_data,
+    }
+    paper = getattr(paper_service, "create_paper")(
+        db=db,
+        pdf_content=content,
+        original_filename=original_filename,
+        summary=summary,
+        pages=page_count,
+        user_id=user.id,
+        classification=initial_meta,
+    )
+
+    classification_error = None
+    report_progress(94, "Classifying research domains and paper type...")
+    try:
+        def report_classification_progress(
+            completed: int,
+            total: int,
+            dimension: str,
+        ) -> None:
+            progress = 94 + round((completed / total) * 5)
+            set_progress(
+                task_id,
+                progress,
+                f"Classifying {dimension.replace('_', ' ')} ({completed}/{total})",
+                result={
+                    "classification_progress": {
+                        "completed": completed,
+                        "total": total,
+                        "current_dimension": dimension,
+                    }
+                },
+                user_id=user.id,
+            )
+
+        classification = await run_in_threadpool(
+            classify_research_paper,
+            text,
+            summary,
+            report_classification_progress,
+            x_ai_provider,
+            x_ai_model,
+        )
+    except RuntimeError as exc:
+        classification_error = str(exc)
+        print(f"[WARNING] Paper saved without AI classification: {exc}", flush=True)
+    else:
+        paper = getattr(paper_service, "update_paper")(
+            db,
+            paper.id,
+            user_id=user.id,
+            classification=classification,
+            figures=figures,
+            chart_data=chart_data,
+        )
+
+    total_time = time.time() - start_time
+    fallback_notice = get_last_fallback_notice()
+    result = {
+        "task_id": task_id,
+        **paper_to_dict(paper),
+        "characters": len(text),
+        "preview": text[:1000],
+        "processing_time_seconds": round(total_time, 2),
+    }
+    if extra_result:
+        result.update(extra_result)
+    if fallback_notice:
+        result["fallback_notice"] = fallback_notice
+    if classification_error:
+        result["classification_error"] = classification_error
+    set_progress(
+        task_id,
+        100,
+        (
+            "Summary saved. AI classification can be retried from My Summaries."
+            if classification_error
+            else "Summary completed and saved to your library."
+        ),
+        "completed",
+        result,
+    )
+    return result
+
+
 @app.post("/upload")
 async def upload_paper(
     file: UploadFile = File(...),
@@ -343,13 +499,6 @@ async def upload_paper(
         if task_db.get(ProgressTask, task_id) is not None:
             raise HTTPException(status_code=409, detail="This analysis task ID has already been used.")
 
-    def report_progress(
-        progress: int,
-        message: str,
-        partial_result: dict[str, Any] | None = None,
-    ) -> None:
-        set_progress(task_id, progress, message, result=partial_result, user_id=user_id)
-
     set_progress(task_id, 0, "Starting upload...", user_id=user_id)
 
     try:
@@ -362,135 +511,17 @@ async def upload_paper(
         if not content:
             raise HTTPException(status_code=400, detail="The uploaded file is empty.")
 
-        report_progress(5, "PDF uploaded. Extracting text...")
-
-        try:
-            with pymupdf.open(stream=content, filetype="pdf") as pdf:
-                if pdf.is_encrypted:
-                    raise HTTPException(status_code=400, detail="Encrypted PDFs are not supported.")
-                page_count = len(pdf)
-                text = "\n".join(str(page.get_text("text")) for page in pdf)
-        except HTTPException:
-            raise
-        except Exception as exc:
-            raise HTTPException(
-                status_code=400,
-                detail="Unable to read this PDF. Please upload a valid PDF file.",
-            ) from exc
-
-        if not text.strip():
-            raise HTTPException(
-                status_code=422,
-                detail="No selectable text found in the PDF. OCR may be required for scanned documents.",
-            )
-
-        report_progress(12, "Extracting figures, plots, and architecture diagrams...")
-        figures = await run_in_threadpool(extract_paper_figures, content, 8)
-
-        report_progress(15, "Text extracted. Preparing AI summarization...")
-
-        set_last_fallback_notice(None)
-        # Persist chunk-level updates so every frontend poll sees the same task state.
-        summary = await run_in_threadpool(
-            summarize_paper,
-            text,
-            report_progress,
-            x_ai_provider,
-            x_ai_model,
-        )
-
-        report_progress(93, "Extracting numerical statistics and benchmark metrics...")
-        chart_data = await run_in_threadpool(
-            extract_research_metrics,
-            text,
-            summary,
-            x_ai_provider,
-            x_ai_model,
-        )
-
-        initial_meta = {
-            "figures": figures,
-            "chart_data": chart_data,
-        }
-        paper = getattr(paper_service, "create_paper")(
-            db=db,
-            pdf_content=content,
+        set_progress(task_id, 5, "PDF uploaded. Extracting text...", user_id=user_id)
+        return await _process_pdf_pipeline(
+            content=content,
             original_filename=file.filename,
-            summary=summary,
-            pages=page_count,
-            user_id=user.id,
-            classification=initial_meta,
+            task_id=task_id,
+            start_time=start_time,
+            x_ai_provider=x_ai_provider,
+            x_ai_model=x_ai_model,
+            db=db,
+            user=user,
         )
-
-        classification_error = None
-        report_progress(94, "Classifying research domains and paper type...")
-        try:
-            def report_classification_progress(
-                completed: int,
-                total: int,
-                dimension: str,
-            ) -> None:
-                progress = 94 + round((completed / total) * 5)
-                set_progress(
-                    task_id,
-                    progress,
-                    f"Classifying {dimension.replace('_', ' ')} ({completed}/{total})",
-                    result={
-                        "classification_progress": {
-                            "completed": completed,
-                            "total": total,
-                            "current_dimension": dimension,
-                        }
-                    },
-                    user_id=user.id,
-                )
-
-            classification = await run_in_threadpool(
-                classify_research_paper,
-                text,
-                summary,
-                report_classification_progress,
-                x_ai_provider,
-                x_ai_model,
-            )
-        except RuntimeError as exc:
-            classification_error = str(exc)
-            print(f"[WARNING] Paper saved without AI classification: {exc}", flush=True)
-        else:
-            paper = getattr(paper_service, "update_paper")(
-                db,
-                paper.id,
-                user_id=user.id,
-                classification=classification,
-                figures=figures,
-                chart_data=chart_data,
-            )
-
-        total_time = time.time() - start_time
-        fallback_notice = get_last_fallback_notice()
-        result = {
-            "task_id": task_id,
-            **paper_to_dict(paper),
-            "characters": len(text),
-            "preview": text[:1000],
-            "processing_time_seconds": round(total_time, 2),
-        }
-        if fallback_notice:
-            result["fallback_notice"] = fallback_notice
-        if classification_error:
-            result["classification_error"] = classification_error
-        set_progress(
-            task_id,
-            100,
-            (
-                "Summary saved. AI classification can be retried from My Summaries."
-                if classification_error
-                else "Summary completed and saved to your library."
-            ),
-            "completed",
-            result,
-        )
-        return result
 
     except HTTPException as exc:
         previous = get_progress_state(task_id, user.id) or {}
@@ -511,6 +542,66 @@ async def upload_paper(
         ) from exc
     finally:
         await file.close()
+
+
+@app.post("/api/papers/import")
+async def import_paper_by_identifier(
+    payload: PaperImportRequest,
+    x_task_id: str | None = Header(default=None, alias="X-Task-ID"),
+    x_ai_provider: str | None = Header(default=None, alias="X-AI-Provider"),
+    x_ai_model: str | None = Header(default=None, alias="X-AI-Model"),
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """Fetch metadata and open-access PDF from arXiv or CrossRef/DOI, then run the summarization pipeline."""
+    start_time = time.time()
+    task_id = x_task_id or str(uuid.uuid4())
+    user_id = int(getattr(user, "id", 0) or 0)
+    with SessionLocal() as task_db:
+        if task_db.get(ProgressTask, task_id) is not None:
+            raise HTTPException(status_code=409, detail="This analysis task ID has already been used.")
+
+    set_progress(task_id, 0, "Resolving paper identifier...", user_id=user_id)
+
+    try:
+        imported = await run_in_threadpool(
+            import_service.fetch_paper_from_identifier,
+            payload.identifier,
+        )
+        set_progress(
+            task_id,
+            5,
+            f"Fetched '{imported.title[:60]}' ({imported.source.upper()}). Extracting text...",
+            user_id=user_id,
+        )
+        return await _process_pdf_pipeline(
+            content=imported.pdf_content,
+            original_filename=imported.filename,
+            task_id=task_id,
+            start_time=start_time,
+            x_ai_provider=x_ai_provider,
+            x_ai_model=x_ai_model,
+            db=db,
+            user=user,
+            extra_result={"import_metadata": imported.to_metadata_dict()},
+        )
+    except HTTPException as exc:
+        previous = get_progress_state(task_id, user.id) or {}
+        set_progress(task_id, previous.get("progress", 0), str(exc.detail), "error")
+        raise
+    except RuntimeError as exc:
+        previous = get_progress_state(task_id, user.id) or {}
+        set_progress(task_id, previous.get("progress", 0), str(exc), "error")
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    except Exception as exc:
+        db.rollback()
+        print(f"[ERROR] Import failed: {exc!r}", flush=True)
+        previous = get_progress_state(task_id, user.id) or {}
+        set_progress(task_id, previous.get("progress", 0), "An unexpected error occurred.", "error")
+        raise HTTPException(
+            status_code=500,
+            detail="An unexpected error occurred while importing the paper.",
+        ) from exc
 
 
 @app.get("/papers")

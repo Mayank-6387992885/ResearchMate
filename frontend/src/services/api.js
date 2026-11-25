@@ -57,6 +57,7 @@ export const API = {
   get githubStart() { return `${getApiBaseUrl()}/auth/github/start`; },
   get linkedinStart() { return `${getApiBaseUrl()}/auth/linkedin/start`; },
   get upload() { return `${getApiBaseUrl()}/upload`; },
+  get importPaper() { return `${getApiBaseUrl()}/api/papers/import`; },
   progress: (taskId) => `${getApiBaseUrl()}/progress/${taskId}`,
   get papers() { return `${getApiBaseUrl()}/papers`; },
   getPaper: (id) => `${getApiBaseUrl()}/papers/${id}`,

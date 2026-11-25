@@ -290,6 +290,8 @@ export default function AutoSummary() {
   const uploadControllerRef = useRef(null);
   const progressControllerRef = useRef(null);
   const progressSamplesRef = useRef({ taskId: "", samples: [] });
+  const [importMode, setImportMode] = useState("file");
+  const [importIdentifier, setImportIdentifier] = useState("");
 
   useEffect(() => {
     let active = true;
@@ -640,6 +642,82 @@ export default function AutoSummary() {
     }
   }
 
+  async function handleImport() {
+    const trimmed = importIdentifier.trim();
+    if (!trimmed) {
+      setError("Please enter an arXiv ID/URL or DOI.");
+      return;
+    }
+
+    const currentTaskId = crypto.randomUUID();
+    const uploadController = new AbortController();
+    const progressController = new AbortController();
+    uploadControllerRef.current = uploadController;
+    progressControllerRef.current = progressController;
+    window.sessionStorage.setItem(ACTIVE_TASK_KEY, currentTaskId);
+    window.sessionStorage.removeItem(PROGRESS_SAMPLES_KEY);
+    progressSamplesRef.current = { taskId: currentTaskId, samples: [] };
+    setTaskId(currentTaskId);
+    setStatus("processing");
+    setProgress(0);
+    setDisplayProgress(0);
+    setMessage("Resolving arXiv / DOI paper...");
+    setError("");
+    setProgressSyncIssue("");
+    setLastSyncedAt(null);
+    setBackendUpdatedAt(null);
+    setTaskStartedAt(null);
+    setTaskFinishedAt(null);
+
+    void syncProgress(currentTaskId, progressController.signal, true).catch((err) => {
+      if (!progressController.signal.aborted) {
+        setProgressSyncIssue(err.message || "Could not sync progress with the backend.");
+      }
+    });
+
+    try {
+      const response = await apiFetch(API.importPaper, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "X-Task-ID": currentTaskId,
+          "X-AI-Provider": aiProvider,
+          "X-AI-Model": aiModel,
+        },
+        body: JSON.stringify({ identifier: trimmed }),
+        signal: uploadController.signal,
+      });
+
+      const data = await response.json();
+      if (!response.ok) {
+        throw new Error(data.detail || "Failed to import paper from arXiv / DOI.");
+      }
+      if (data.task_id !== currentTaskId) {
+        throw new Error("The backend returned a result for a different task.");
+      }
+      setResult(data);
+      setPartialResult(null);
+      setProgress(100);
+      setMessage("Summary completed and saved to your library.");
+      setStatus("completed");
+      setLastSyncedAt(Date.now());
+      setTaskFinishedAt(Date.now());
+      progressController.abort();
+    } catch (err) {
+      if (!uploadController.signal.aborted) {
+        setStatus("error");
+        setError(err.message || "Failed to import paper.");
+      }
+    } finally {
+      if (uploadControllerRef.current === uploadController) {
+        uploadControllerRef.current = null;
+      }
+      if (progressController.signal.aborted && progressControllerRef.current === progressController) {
+        progressControllerRef.current = null;
+      }
+    }
+  }
+
   const isProcessing = status === "processing";
   const progressSamples = progressSamplesRef.current.samples;
   const firstProgressSample = progressSamples[0];
@@ -793,31 +871,84 @@ export default function AutoSummary() {
           </div>
         </div>
 
-        <FileUpload
-          file={file}
-          onFileSelect={(selected) => {
-            window.sessionStorage.removeItem(ACTIVE_TASK_KEY);
-            setTaskId("");
-            setFile(selected);
-            setResult(null);
-            setPartialResult(null);
-            setError("");
-            setStatus("idle");
-            setProgress(0);
-            setDisplayProgress(0);
-            setMessage("Ready to upload.");
-            setProgressSyncIssue("");
-            setLastSyncedAt(null);
-            setBackendUpdatedAt(null);
-            setTaskStartedAt(null);
-            setTaskFinishedAt(null);
-          }}
-          disabled={isProcessing}
-        />
+        <div style={{ display: "flex", gap: "8px", marginBottom: "12px" }} role="tablist" aria-label="Paper input method">
+          <button
+            type="button"
+            role="tab"
+            aria-selected={importMode === "file"}
+            className={importMode === "file" ? "primary-button" : "secondary-button"}
+            onClick={() => setImportMode("file")}
+            disabled={isProcessing}
+            style={{ flex: 1 }}
+          >
+            Upload PDF
+          </button>
+          <button
+            type="button"
+            role="tab"
+            aria-selected={importMode === "url"}
+            className={importMode === "url" ? "primary-button" : "secondary-button"}
+            onClick={() => setImportMode("url")}
+            disabled={isProcessing}
+            style={{ flex: 1 }}
+          >
+            arXiv / DOI Import
+          </button>
+        </div>
 
-        <button className="primary-button full-width" onClick={() => handleUpload()} disabled={!file || isProcessing}>
+        {importMode === "file" ? (
+          <FileUpload
+            file={file}
+            onFileSelect={(selected) => {
+              window.sessionStorage.removeItem(ACTIVE_TASK_KEY);
+              setTaskId("");
+              setFile(selected);
+              setResult(null);
+              setPartialResult(null);
+              setError("");
+              setStatus("idle");
+              setProgress(0);
+              setDisplayProgress(0);
+              setMessage("Ready to upload.");
+              setProgressSyncIssue("");
+              setLastSyncedAt(null);
+              setBackendUpdatedAt(null);
+              setTaskStartedAt(null);
+              setTaskFinishedAt(null);
+            }}
+            disabled={isProcessing}
+          />
+        ) : (
+          <div className="upload-box" style={{ textAlign: "left", alignItems: "stretch", gap: "10px" }}>
+            <label htmlFor="arxiv-doi-input" style={{ fontWeight: 600, fontSize: "14px" }}>
+              Paste arXiv ID / URL or DOI
+            </label>
+            <input
+              id="arxiv-doi-input"
+              type="text"
+              value={importIdentifier}
+              onChange={(e) => setImportIdentifier(e.target.value)}
+              placeholder="e.g. 2301.07041, https://arxiv.org/abs/2301.07041, or 10.1038/s41586-021-03819-2"
+              disabled={isProcessing}
+              style={{
+                width: "100%",
+                padding: "10px 12px",
+                borderRadius: "8px",
+                border: "1px solid var(--border-color, #cbd5e1)",
+                fontSize: "14px",
+              }}
+            />
+            <small>Fetches metadata and open-access PDF automatically from arXiv or CrossRef.</small>
+          </div>
+        )}
+
+        <button
+          className="primary-button full-width"
+          onClick={() => (importMode === "file" ? handleUpload() : handleImport())}
+          disabled={(importMode === "file" ? !file : !importIdentifier.trim()) || isProcessing}
+        >
           {isProcessing ? <LoaderCircle className="spin" size={17} /> : <Sparkles size={17} />}
-          {isProcessing ? "Analyzing paper..." : "Generate summary"}
+          {isProcessing ? "Analyzing paper..." : importMode === "file" ? "Generate summary" : "Import & generate summary"}
         </button>
       </section>
 
