@@ -24,10 +24,20 @@ def test_public_profile_returns_display_name_and_saved_papers(tmp_path):
     Base.metadata.create_all(bind=engine)
     db = TestingSessionLocal()
 
-    user = User(email="alice@research.org", password_hash="x")
-    db.add(user)
+    user = User(
+        email="alice@research.org",
+        password_hash="x",
+        privacy_settings={"public_profile": True},
+    )
+    private_user = User(
+        email="bob@research.org",
+        password_hash="x",
+        privacy_settings={"public_profile": False},
+    )
+    db.add_all([user, private_user])
     db.commit()
     db.refresh(user)
+    db.refresh(private_user)
 
     db.add(
         ResearchPaper(
@@ -60,5 +70,8 @@ def test_public_profile_returns_display_name_and_saved_papers(tmp_path):
             assert data["saved_papers_count"] == 1
             assert data["saved_papers"][0]["title"] == "Public Paper"
             assert "email" not in data
+
+            private_res = client.get(f"/api/users/{private_user.id}/public-profile")
+            assert private_res.status_code == 403
     finally:
         main.app.dependency_overrides.clear()

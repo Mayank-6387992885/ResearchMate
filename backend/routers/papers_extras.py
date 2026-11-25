@@ -254,10 +254,14 @@ async def chat_with_paper(
 
 @router.get("/api/users/{user_id}/public-profile")
 def get_public_profile(user_id: int, db: Session = Depends(get_db)):
-    """Return a researcher's public profile and saved paper titles."""
+    """Return a researcher's public profile and saved paper titles when opted in."""
     user = db.query(User).filter(User.id == user_id).first()
     if not user:
         raise HTTPException(status_code=404, detail="Researcher profile not found.")
+
+    privacy = getattr(user, "privacy_settings", None) or {}
+    if not isinstance(privacy, dict) or not privacy.get("public_profile", False):
+        raise HTTPException(status_code=403, detail="This researcher profile is private.")
 
     saved_papers = (
         db.query(ResearchPaper)
