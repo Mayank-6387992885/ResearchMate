@@ -14,10 +14,21 @@ import pymupdf
 from sqlalchemy.orm import Session
 
 from models.paper_chunk_embedding import PaperChunkEmbedding
-from services.semantic_search import cosine_similarity, fetch_ollama_embedding
+from services.semantic_search import fetch_ollama_embedding
 from summarizer import call_ollama
 
 DEFAULT_EMBEDDING_MODEL = os.getenv("OLLAMA_EMBEDDING_MODEL", "nomic-embed-text")
+
+
+def _cosine_similarity(a: list[float], b: list[float]) -> float:
+    if not a or not b or len(a) != len(b):
+        return 0.0
+    dot = sum(x * y for x, y in zip(a, b))
+    norm_a = math.sqrt(sum(x * x for x in a))
+    norm_b = math.sqrt(sum(y * y for y in b))
+    if norm_a == 0.0 or norm_b == 0.0:
+        return 0.0
+    return dot / (norm_a * norm_b)
 
 _STOPWORDS = frozenset({
     "a", "an", "and", "are", "as", "at", "be", "by", "for", "from", "has", "he",
@@ -347,7 +358,7 @@ def retrieve_relevant_chunks_with_embeddings(
         if not vec:
             return retrieve_relevant_chunks(question, chunks, top_k=top_k)
 
-        score = cosine_similarity(query_vec, vec)
+        score = _cosine_similarity(query_vec, vec)
         scored.append((score, chunk))
 
     if new_rows and db is not None:
