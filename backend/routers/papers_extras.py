@@ -326,3 +326,72 @@ async def analyze_paper_gaps_and_methodology(
         return {"paper_id": paper.id, "title": paper.title, "analysis": raw}
     except Exception as exc:
         raise HTTPException(status_code=502, detail=f"Gap analysis failed: {exc}") from exc
+
+
+@router.get("/api/papers/{paper_id}/export-pdf")
+def export_paper_report_pdf(
+    paper_id: int,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """Export a formatted PDF report containing the paper summary and metadata."""
+    import fitz
+    from fastapi.responses import Response
+
+    paper = getattr(paper_service, "get_paper_or_404")(db, paper_id, user.id)
+    doc = fitz.open()
+    page = doc.new_page()
+    text_lines = [
+        f"ResearchMate Report: {paper.title}",
+        f"Category: {paper.category}",
+        f"Pages: {paper.pages}",
+        "",
+        "Summary:",
+        paper.summary or "",
+    ]
+    page.insert_text((50, 50), "\n".join(text_lines), fontsize=10)
+    pdf_bytes = doc.tobytes()
+    doc.close()
+    return Response(
+        content=pdf_bytes,
+        media_type="application/pdf",
+        headers={"Content-Disposition": f'attachment; filename="paper_{paper.id}_report.pdf"'},
+    )
+
+
+@router.get("/api/papers/{paper_id}/export-docx")
+def export_paper_report_docx(
+    paper_id: int,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """Export a formatted DOCX report containing the paper summary and metadata."""
+    import io
+    from docx import Document
+    from fastapi.responses import Response
+
+    paper = getattr(paper_service, "get_paper_or_404")(db, paper_id, user.id)
+    doc = Document()
+    doc.add_heading(paper.title, level=1)
+    doc.add_paragraph(f"Category: {paper.category} | Pages: {paper.pages}")
+    doc.add_heading("Summary", level=2)
+    doc.add_paragraph(paper.summary or "")
+
+    buf = io.BytesIO()
+    doc.save(buf)
+    return Response(
+        content=buf.getvalue(),
+        media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        headers={"Content-Disposition": f'attachment; filename="paper_{paper.id}_report.docx"'},
+    )
+
+
+@router.post("/api/system/backup")
+def trigger_database_backup(user: User = Depends(get_current_user)):
+    """Create a timestamped SQLite database backup."""
+    from services.backup_service import create_database_backup
+
+    if not getattr(user, "is_admin", False):
+        raise HTTPException(status_code=403, detail="Admin privileges required to trigger backups.")
+    backup_path = create_database_backup()
+    return {"status": "ok", "backup_file": backup_path.name}
