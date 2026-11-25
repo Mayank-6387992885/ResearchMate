@@ -235,3 +235,23 @@ All paper and analysis endpoints require a signed-in account.
 | Frontend API URL | Defaults to `http://localhost:8000`; set `VITE_API_BASE_URL` when deploying elsewhere |
 
 Existing database tables are kept during startup migrations. The sidebar stays in view while you scroll, and account-owned papers, downloads, uploads, and progress tasks are scoped to the signed-in user.
+
+---
+
+## 📋 Implementation Status
+
+- **Backend tests**: 60 passed, 2 subtests passed (`python -m pytest backend/tests -q`)
+- **Frontend tests**: 4 test files, 7 tests passed (`npm test -- --run` in `frontend/`)
+
+### Completed
+- [x] **Authentication & Account Management**: Email/password registration & login, email verification, password reset, session handling, OAuth, SMS/phone verification, and user-level data isolation.
+- [x] **PDF Upload & Analysis**: PDF upload, size/type validation, corrupted/password-protected handling, page-preserving extraction, OCR fallback (`pytesseract`), section-by-section summarization, progress tracking, and cached-section reuse.
+- [x] **AI Classification & Paper Intelligence**: Domain/subdomain/methodology/paper-type/application/AI-ML technique classification, plus research gap & methodology analysis (`/api/papers/{paper_id}/analyze-gaps`).
+- [x] **RAG & Multi-Paper Analysis**: PDF chunking, embeddings, ChromaDB vector store (`ChromaVectorStore`), semantic search, paper Q&A with page-level citations, and two-paper comparison (`/api/papers/compare`).
+- [x] **Research Library & Exports**: Listing, search, sorting/grouping, rename, save/unsave, delete, PDF/summary download, BibTeX citation export, PDF report export (`/api/papers/{paper_id}/export-pdf`), and DOCX report export (`/api/papers/{paper_id}/export-docx`).
+- [x] **Backend Architecture & DevOps**: Centralized exception handling, structured logging, rate limiting, `/health` & `/ready` endpoints, Alembic migrations, SQLite backup service (`create_database_backup`), Dockerfiles, `docker-compose.yml`, `render.yaml`, and GitHub Actions CI.
+
+### Pending (Requires Live DB Migration / External Services)
+- [ ] **Duplicate PDF Detection & Productivity Columns**: Requires an Alembic migration on the live Supabase PostgreSQL database (`file_hash`, bookmarks, notes, tags, reading progress, collections).
+- [ ] **AI Evaluation Suite**: Requires a curated ground-truth dataset and live/local LLM inference benchmarks.
+- [ ] **Production & Release**: Error monitoring/APM (e.g., Sentry), persistent cloud storage verification, Render deployment, HTTPS/cookie verification, and demo/screenshots.
