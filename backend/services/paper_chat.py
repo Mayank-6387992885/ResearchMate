@@ -245,9 +245,12 @@ def answer_paper_question(
     paper_title: str = "Research Paper",
     history: list[dict[str, str]] | None = None,
     top_k: int = 5,
+    provider: str | None = None,
+    model: str | None = None,
+    skip_retrieval: bool = False,
 ) -> dict[str, Any]:
     """Retrieve top chunks and prompt the active LLM to answer with citations."""
-    top_chunks = retrieve_relevant_chunks(question, chunks, top_k=top_k)
+    top_chunks = chunks[:top_k] if skip_retrieval else retrieve_relevant_chunks(question, chunks, top_k=top_k)
     if not top_chunks:
         return {
             "answer": "I could not find any readable text in this paper to answer your question.",
