@@ -15,7 +15,7 @@ from sqlalchemy.orm import Session
 
 from models.paper_chunk_embedding import PaperChunkEmbedding
 from services.semantic_search import fetch_ollama_embedding
-from summarizer import call_ollama
+from summarizer import call_ollama, stream_ollama
 
 DEFAULT_EMBEDDING_MODEL = os.getenv("OLLAMA_EMBEDDING_MODEL", "nomic-embed-text")
 

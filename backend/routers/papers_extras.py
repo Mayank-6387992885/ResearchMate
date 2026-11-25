@@ -244,6 +244,9 @@ async def chat_with_paper(
             selected_chunks,
             paper_title=paper.title or paper.filename or f"Paper #{paper.id}",
             history=payload.history,
+            provider=x_ai_provider,
+            model=x_ai_model,
+            skip_retrieval=True,
         )
     except Exception as exc:
         raise HTTPException(
