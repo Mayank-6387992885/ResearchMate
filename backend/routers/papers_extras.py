@@ -177,11 +177,11 @@ def get_paper_citation(
     user: User = Depends(get_current_user),
 ):
     paper = getattr(paper_service, "get_paper_or_404")(db, paper_id, user.id)
-    content, media_type, filename = citation_service.format_citation(paper, fmt=format)
+    content, media_type, ext = citation_service.format_citation(paper, fmt=format)
     return Response(
         content=content,
         media_type=media_type,
-        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+        headers={"Content-Disposition": f'attachment; filename="paper-{paper.id}.{ext}"'},
     )
 
 
