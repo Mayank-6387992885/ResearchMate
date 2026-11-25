@@ -762,7 +762,7 @@ export default function MySummaries() {
 
               <div className="paper-card-actions">
                 <button
-                  className="secondary-button paper-action-button paper-classify-action"
+                  className="secondary-button paper-action-button"
                   type="button"
                   onClick={() => setSelectedPaper(paper)}
                 >
@@ -771,7 +771,7 @@ export default function MySummaries() {
                 </button>
 
                 <button
-                  className="secondary-button paper-action-button paper-classify-action"
+                  className="secondary-button paper-action-button"
                   type="button"
                   onClick={() => openPaperEditor(paper, "title")}
                 >
@@ -800,7 +800,7 @@ export default function MySummaries() {
                 <CitationExport paperId={paper.id} />
 
                 <button
-                  className="secondary-button paper-action-button paper-classify-action"
+                  className="secondary-button paper-action-button"
                   type="button"
                   onClick={() => openPaperEditor(paper, "classification")}
                 >
