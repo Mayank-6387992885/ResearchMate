@@ -340,6 +340,7 @@
   line-height: 1.2;
 }
 
+.paper-classify-action,
 .paper-delete-action {
   grid-column: 1 / -1;
 }
