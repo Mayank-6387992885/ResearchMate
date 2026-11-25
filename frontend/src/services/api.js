@@ -68,6 +68,7 @@ export const API = {
   classifyPaper: (id) => `${getApiBaseUrl()}/papers/${id}/classify`,
   chatPaper: (id) => `${getApiBaseUrl()}/papers/${id}/chat`,
   downloadPaper: (id) => `${getApiBaseUrl()}/papers/${id}/download`,
+  paperPdf: (id) => `${getApiBaseUrl()}/papers/${id}/pdf`,
   downloadSummary: (id) => `${getApiBaseUrl()}/papers/${id}/download-summary`,
   paperCitation: (id, format = "bibtex") => `${getApiBaseUrl()}/papers/${id}/citation?format=${encodeURIComponent(format)}`,
   deletePaper: (id) => `${getApiBaseUrl()}/papers/${id}`,

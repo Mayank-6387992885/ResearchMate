@@ -1,12 +1,14 @@
 import { useState } from "react";
 import { MessageSquare, Send, LoaderCircle, BookOpen, AlertCircle } from "lucide-react";
 import { API, apiFetch } from "../services/api";
+import PdfViewerModal from "./PdfViewerModal";
 
 export default function PaperChatPanel({ paperId, paperTitle }) {
   const [question, setQuestion] = useState("");
   const [messages, setMessages] = useState([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
+  const [viewerPage, setViewerPage] = useState(null);
 
   if (!paperId) {
     return null;
@@ -98,9 +100,12 @@ export default function PaperChatPanel({ paperId, paperTitle }) {
               {item.citations.length > 0 && (
                 <div style={{ display: "flex", flexWrap: "wrap", gap: "0.4rem" }}>
                   {item.citations.map((cite, idx) => (
-                    <span
+                    <button
+                      type="button"
                       key={`${item.id}-cite-${idx}`}
                       title={cite.excerpt}
+                      onClick={() => setViewerPage(cite.page || 1)}
+                      aria-label={`Open PDF at page ${cite.page}`}
                       style={{
                         display: "inline-flex",
                         alignItems: "center",
@@ -111,11 +116,13 @@ export default function PaperChatPanel({ paperId, paperTitle }) {
                         background: "rgba(79, 70, 229, 0.1)",
                         color: "#4f46e5",
                         fontWeight: 500,
+                        border: "none",
+                        cursor: "pointer",
                       }}
                     >
                       <BookOpen size={12} />
                       Page {cite.page} · {cite.section}
-                    </span>
+                    </button>
                   ))}
                 </div>
               )}
@@ -153,6 +160,12 @@ export default function PaperChatPanel({ paperId, paperTitle }) {
           {loading ? "Thinking..." : "Ask"}
         </button>
       </form>
+      <PdfViewerModal
+        paperId={viewerPage ? paperId : null}
+        paperTitle={paperTitle}
+        page={viewerPage}
+        onClose={() => setViewerPage(null)}
+      />
     </section>
   );
 }
