@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import math
 import re
 from collections import Counter
@@ -9,7 +10,10 @@ from dataclasses import dataclass
 from typing import Any
 
 import pymupdf
+from sqlalchemy.orm import Session
 
+from models.paper_chunk_embedding import PaperChunkEmbedding
+from services.semantic_search import DEFAULT_EMBEDDING_MODEL, cosine_similarity, fetch_ollama_embedding
 from summarizer import call_ollama
 
 _STOPWORDS = frozenset({
@@ -277,3 +281,78 @@ def answer_paper_question(
         for c in top_chunks
     ]
     return {"answer": answer, "citations": citations}
+
+
+def _chunk_content_hash(chunk: PaperChunk) -> str:
+    payload = f"{chunk.page}|{chunk.section}|{chunk.text}".encode("utf-8", errors="ignore")
+    return hashlib.sha256(payload).hexdigest()
+
+
+def retrieve_relevant_chunks_with_embeddings(
+    db: Session | None,
+    paper_id: int | None,
+    question: str,
+    chunks: list[PaperChunk],
+    top_k: int = 4,
+    model_name: str = DEFAULT_EMBEDDING_MODEL,
+) -> list[PaperChunk]:
+    """Retrieve top-k chunks using cached Ollama embeddings, falling back to TF-IDF."""
+    if not chunks:
+        return []
+
+    query_vec = fetch_ollama_embedding(question, model=model_name)
+    if not query_vec:
+        return retrieve_relevant_chunks(question, chunks, top_k=top_k)
+
+    existing_by_hash: dict[str, PaperChunkEmbedding] = {}
+    if db is not None and paper_id is not None:
+        try:
+            rows = (
+                db.query(PaperChunkEmbedding)
+                .filter(
+                    PaperChunkEmbedding.paper_id == paper_id,
+                    PaperChunkEmbedding.model_name == model_name,
+                )
+                .all()
+            )
+            existing_by_hash = {row.content_hash: row for row in rows}
+        except Exception:
+            existing_by_hash = {}
+
+    scored: list[tuple[float, PaperChunk]] = []
+    new_rows: list[PaperChunkEmbedding] = []
+
+    for chunk in chunks:
+        c_hash = _chunk_content_hash(chunk)
+        cached = existing_by_hash.get(c_hash)
+        if cached and isinstance(cached.embedding, list):
+            vec = cached.embedding
+        else:
+            vec = fetch_ollama_embedding(f"{chunk.section}\n{chunk.text}", model=model_name)
+            if vec and db is not None and paper_id is not None:
+                new_rows.append(
+                    PaperChunkEmbedding(
+                        paper_id=paper_id,
+                        chunk_id=chunk.chunk_id,
+                        page=chunk.page,
+                        section=chunk.section,
+                        model_name=model_name,
+                        content_hash=c_hash,
+                        embedding=vec,
+                    )
+                )
+        if not vec:
+            return retrieve_relevant_chunks(question, chunks, top_k=top_k)
+
+        score = cosine_similarity(query_vec, vec)
+        scored.append((score, chunk))
+
+    if new_rows and db is not None:
+        try:
+            db.add_all(new_rows)
+            db.commit()
+        except Exception:
+            db.rollback()
+
+    scored.sort(key=lambda item: item[0], reverse=True)
+    return [chunk for _, chunk in scored[:top_k]]

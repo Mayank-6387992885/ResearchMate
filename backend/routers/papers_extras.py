@@ -13,7 +13,12 @@ from models.user import User
 import services.citation_service as citation_service
 import services.paper_service as paper_service
 from services.assistant_chat import answer_workspace_question
-from services.paper_chat import PaperChunk, answer_paper_question, extract_chunks_from_pdf
+from services.paper_chat import (
+    PaperChunk,
+    answer_paper_question,
+    extract_chunks_from_pdf,
+    retrieve_relevant_chunks_with_embeddings,
+)
 from services.semantic_search import semantic_search_papers
 from summarizer import compare_papers
 
@@ -224,10 +229,18 @@ async def chat_with_paper(
         )
 
     try:
+        selected_chunks = await run_in_threadpool(
+            retrieve_relevant_chunks_with_embeddings,
+            db,
+            paper.id,
+            question,
+            chunks,
+            4,
+        )
         return await run_in_threadpool(
             answer_paper_question,
             question,
-            chunks,
+            selected_chunks,
             paper_title=paper.title or paper.filename or f"Paper #{paper.id}",
             history=payload.history,
         )

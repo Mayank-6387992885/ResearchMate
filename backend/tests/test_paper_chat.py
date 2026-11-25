@@ -121,3 +121,62 @@ class PaperChatEndpointTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class PaperChunkEmbeddingRetrievalTests(unittest.TestCase):
+    def test_embedding_retrieval_caches_chunks_and_returns_accurate_citations(self):
+        from sqlalchemy import create_engine
+        from sqlalchemy.orm import sessionmaker
+        from database import Base
+        from models.paper_chunk_embedding import PaperChunkEmbedding
+        from services.paper_chat import PaperChunk, retrieve_relevant_chunks_with_embeddings
+
+        engine = create_engine("sqlite:///:memory:", connect_args={"check_same_thread": False})
+        TestingSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+        Base.metadata.create_all(bind=engine)
+        db = TestingSessionLocal()
+
+        chunks = [
+            PaperChunk(chunk_id=0, page=1, section="Introduction", text="Overview of climate models."),
+            PaperChunk(chunk_id=1, page=3, section="Experiments", text="Solar cells reached 29.1% efficiency."),
+            PaperChunk(chunk_id=2, page=5, section="Conclusion", text="Future work on stability."),
+        ]
+
+        def fake_embed(text, model=None):
+            if "efficiency" in text.lower() or "solar" in text.lower():
+                return [1.0, 0.0, 0.0]
+            if "climate" in text.lower():
+                return [0.0, 1.0, 0.0]
+            return [0.0, 0.0, 1.0]
+
+        with patch("services.paper_chat.fetch_ollama_embedding", side_effect=fake_embed) as mock_embed:
+            first_top = retrieve_relevant_chunks_with_embeddings(
+                db, paper_id=101, question="What solar efficiency was achieved?", chunks=chunks, top_k=1
+            )
+            self.assertEqual(len(first_top), 1)
+            self.assertEqual(first_top[0].page, 3)
+            self.assertEqual(first_top[0].section, "Experiments")
+            self.assertEqual(db.query(PaperChunkEmbedding).count(), 3)
+            first_calls = mock_embed.call_count  # 1 query + 3 chunks = 4
+
+            second_top = retrieve_relevant_chunks_with_embeddings(
+                db, paper_id=101, question="What solar efficiency was achieved?", chunks=chunks, top_k=1
+            )
+            self.assertEqual(second_top[0].page, 3)
+            # Only 1 additional call for the query; all 3 chunks were served from DB cache.
+            self.assertEqual(mock_embed.call_count, first_calls + 1)
+
+    def test_embedding_retrieval_falls_back_to_tfidf_when_ollama_unavailable(self):
+        from services.paper_chat import PaperChunk, retrieve_relevant_chunks_with_embeddings
+
+        chunks = [
+            PaperChunk(chunk_id=0, page=1, section="Abstract", text="General introduction."),
+            PaperChunk(chunk_id=1, page=4, section="Results", text="Transformer BLEU score reached 28.4."),
+        ]
+        with patch("services.paper_chat.fetch_ollama_embedding", return_value=None):
+            top = retrieve_relevant_chunks_with_embeddings(
+                None, paper_id=None, question="What BLEU score did Transformer reach?", chunks=chunks, top_k=1
+            )
+        self.assertEqual(len(top), 1)
+        self.assertEqual(top[0].page, 4)
+        self.assertEqual(top[0].section, "Results")
