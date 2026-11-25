@@ -59,6 +59,7 @@ def answer_workspace_question(
         "If the question is out of topic, out of scope, or you do not have a data-driven answer from the project info or saved papers, reply strictly with: 'not known'.\n"
         "FORMAT RULE: Present your answer using clear, concise bullet points (e.g. '- **Point**: detail') instead of long paragraphs so it is easy to scan.\n"
         "EVIDENCE RULE: Give a complete, well-finished answer backed by concrete data, numbers, and facts from the saved papers or project details. Never cut off mid-sentence.\n"
+        "FOLLOW-UP RULE: At the very end of your response, on a new line, output 'FOLLOW_UP_QUESTIONS:' followed by 3 short, specific follow-up questions (one per line starting with '- ') that deepen the exact topic just discussed. Do NOT repeat any question already asked.\n"
         "When citing a saved paper, mention its title.\n\n"
         f"=== RESEARCHMATE PROJECT ===\n{PROJECT_CAPABILITIES}\n\n"
         f"=== USER'S SAVED PAPERS ({len(papers)} total, top matches shown) ===\n{library_context}\n\n"
@@ -66,13 +67,18 @@ def answer_workspace_question(
         + f"User Question: {cleaned}\n\nAnswer:"
     )
 
-    answer = summarizer.stream_ollama(
+    raw_response = summarizer.stream_ollama(
         prompt,
         max_tokens=1500,
         json_format=False,
         provider=provider,
         model=model,
     )
+
+    answer, llm_suggestions = _split_answer_and_suggestions(raw_response)
+    asked = _collect_asked_questions(cleaned, history)
+    filtered_llm = [s for s in llm_suggestions if s.strip().lower() not in asked][:3]
+    suggestions = filtered_llm if filtered_llm else _build_follow_up_suggestions(cleaned, selected_papers, history)
 
     referenced = [
         {"id": p.id, "title": p.title}
@@ -87,8 +93,31 @@ def answer_workspace_question(
     return {
         "answer": answer.strip(),
         "referenced_papers": referenced,
-        "suggested_questions": _build_follow_up_suggestions(cleaned, selected_papers, history),
+        "suggested_questions": suggestions,
     }
+
+
+def _collect_asked_questions(question: str, history: list[dict[str, str]] | None = None) -> set[str]:
+    asked = {question.strip().lower()}
+    for turn in history or []:
+        if turn.get("role") == "user":
+            content = (turn.get("content") or "").strip().lower()
+            if content:
+                asked.add(content)
+    return asked
+
+
+def _split_answer_and_suggestions(raw_text: str) -> tuple[str, list[str]]:
+    marker = "FOLLOW_UP_QUESTIONS:"
+    if marker not in raw_text:
+        return raw_text, []
+    answer_part, _, suggestions_part = raw_text.partition(marker)
+    parsed: list[str] = []
+    for line in suggestions_part.splitlines():
+        cleaned_line = line.strip().lstrip("-*•0123456789. ").strip()
+        if cleaned_line:
+            parsed.append(cleaned_line)
+    return answer_part.strip(), parsed[:3]
 
 
 def _build_follow_up_suggestions(
